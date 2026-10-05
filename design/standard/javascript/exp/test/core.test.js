@@ -98,7 +98,7 @@
     });
 
     test('core: every exp_config block is merged (the pagelayout\'s and the page\'s)', function (t) {
-        var blocks = document.querySelectorAll('script[type="application/json"]#exp-config');
+        var blocks = document.querySelectorAll('script[type="application/json"][data-exp-config]');
         t.ok(blocks.length >= 1, 'at least one block');
         // the test page's own block carries the texts and preferences; the admin head's block (when present) only
         // the configuration: both must be in force

@@ -20,8 +20,8 @@ final class TemplateOperatorTest extends TestCase
         $op = new expUITemplateOperators();
         $value = null;
         $op->modify( null, 'exp_config', array(), '', '', $value, array( 'options' => array( 'strings' => array( 'Extra' ), 'prefs' => array( 'bad name' ) ) ) );
-        $this->assertStringStartsWith( '<script type="application/json" id="exp-config">', $value );
-        $data = json_decode( substr( $value, strlen( '<script type="application/json" id="exp-config">' ), -strlen( '</script>' ) ), true );
+        $this->assertStringStartsWith( '<script type="application/json" data-exp-config>', $value );
+        $data = json_decode( substr( $value, strlen( '<script type="application/json" data-exp-config>' ), -strlen( '</script>' ) ), true );
         $this->assertArrayHasKey( 'Extra', $data['strings'] );
         $this->assertSame( array(), $data['prefs'] );
     }

@@ -4,7 +4,7 @@
  * @author  7x <info@se7enx.com>
  * @date    01 Oct 2026
  *
- * {exp_config()} writes the page's Exp configuration (<script type="application/json" id="exp-config">), once,
+ * {exp_config()} writes the page's Exp configuration (<script type="application/json" data-exp-config>), once,
  * before the exp:: scripts:
  *
  *   {exp_config( hash( 'prefs', array( 'admin_left_menu_size' ), 'strings', array( 'Saved' ) ) )}

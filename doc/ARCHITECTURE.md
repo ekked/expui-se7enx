@@ -127,7 +127,7 @@ active.
 
 **Configuration blocks are merged.** The admin head writes one block, and a
 template may add its own (`{exp_config( hash( 'prefs', … ) )}`) anywhere. The
-core reads every `script#exp-config` (and `[data-exp-config]`) in page order and
+core reads every `script[data-exp-config]` (and, from pages cached before 1.0.0.6, `script#exp-config`) in page order and
 merges them: configuration deeply, texts and preferences by name. Blocks
 further down the page than the scripts are merged when the page is ready. A
 preference set with `Exp.prefs.set()` since the page loaded is not overwritten

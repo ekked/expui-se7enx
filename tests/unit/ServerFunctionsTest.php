@@ -187,9 +187,9 @@ final class ServerFunctionsTest extends TestCase
     public function testConfigScriptCannotBeClosedByAValue()
     {
         $html = expUIServerFunctions::configScript( array(), array( '</script><script>alert(1)</script>' ) );
-        $this->assertStringStartsWith( '<script type="application/json" id="exp-config">', $html );
+        $this->assertStringStartsWith( '<script type="application/json" data-exp-config>', $html );
         $this->assertSame( 1, substr_count( $html, '</script>' ), 'only the closing tag of the block itself' );
-        $json = substr( $html, strlen( '<script type="application/json" id="exp-config">' ), -strlen( '</script>' ) );
+        $json = substr( $html, strlen( '<script type="application/json" data-exp-config>' ), -strlen( '</script>' ) );
         $data = json_decode( $json, true );
         $this->assertIsArray( $data );
         $this->assertArrayHasKey( '</script><script>alert(1)</script>', $data['strings'] );

@@ -108,7 +108,7 @@ The module keys are the names in `expUIServerFunctions::MODULES`; each puts
 | `prefs` | preference names whose values `Exp.prefs.get()` needs (letters, digits, `_`, `.`, `-`; others are ignored) |
 | `strings` | more texts for `Exp.i18n()` on this page |
 
-It writes one `<script type="application/json" id="exp-config">` block with the
+It writes one `<script type="application/json" data-exp-config>` block with the
 addresses, the siteaccess, its locale, the texts and the preferences. Values are
 escaped so nothing in them can end the block. A page may have several: the
 admin designs write one in their `<head>`, and a template can add its own for

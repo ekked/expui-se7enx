@@ -3,7 +3,7 @@
  * GNU General Public License v2.0 (or any later version). https://github.com/se7enxweb/expui
  *
  * Loaded by the exp::core packer key after jQuery 4 (Exp.$). Reads the page's configuration from
- * <script type="application/json" id="exp-config"> (the exp_config() template operator).
+ * <script type="application/json" data-exp-config> (the exp_config() template operator).
  *
  *   Exp.config, Exp.i18n(), Exp.on() / Exp.off() / Exp.emit(), Exp.register() / Exp.start(),
  *   Exp.ready(), Exp.prefs.get() / .set(), Exp.keys.bind() / .unbind(), Exp.reducedMotion

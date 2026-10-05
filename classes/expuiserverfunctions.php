@@ -290,7 +290,7 @@ JS;
     }
 
     /**
-     * config() as the <script type="application/json" id="exp-config"> block the core reads. Escaped so nothing in
+     * config() as the <script type="application/json" data-exp-config> block the core reads. Escaped so nothing in
      * a value can end the script element.
      *
      * @return string HTML
@@ -299,6 +299,6 @@ JS;
     {
         $json = json_encode( self::config( $preferences, $strings ),
                              JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
-        return '<script type="application/json" id="exp-config">' . $json . '</script>';
+        return '<script type="application/json" data-exp-config>' . $json . '</script>';
     }
 }
