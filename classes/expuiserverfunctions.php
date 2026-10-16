@@ -27,7 +27,7 @@
 
 class expUIServerFunctions
 {
-    const VERSION = '1.0.0.6';
+    const VERSION = '1.0.0.7';
 
     /**
      * The module packer keys: exp::<name> puts exp/<name>.js in front of the rest of the pack (each needs exp::core
