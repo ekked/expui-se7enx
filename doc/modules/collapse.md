@@ -116,6 +116,11 @@ Enter (or Space for a button). `aria-expanded` tells screen readers whether
 the panel is open. The link's `href` stays as the fallback without
 JavaScript.
 
+A `link` that is no control by itself (an `<a>` without `href`, a `<span>`)
+and has no `role` of its own is made one: it gets `role="button"` and
+`tabindex="0"` (a `tabindex` of its own is kept), and Enter and Space toggle
+it. The autosave preview's link is such a link.
+
 From YUI
 --------
 

@@ -99,7 +99,7 @@ php bin/php/ezcache.php --clear-all
 ```
 
 Open `/expui/test` in the admin: every unit test of the API runs there, on a real
-admin page, and should say *110 passed, 0 failed*. Then follow
+admin page, and should say *116 passed, 0 failed*. Then follow
 [doc/GETTING_STARTED.md](doc/GETTING_STARTED.md).
 
 Documentation

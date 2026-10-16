@@ -11,7 +11,7 @@ After [installing](INSTALL.md), open the admin and go to **`/expui/test`**
 (for example `https://example.com/admin/expui/test`). The page runs every unit
 test of the API on a real admin page. It should end with:
 
-> **110 passed, 0 failed**
+> **116 passed, 0 failed**
 
 If it does not, the failing test's name says what is wrong; see the
 [FAQ](FAQ.md).

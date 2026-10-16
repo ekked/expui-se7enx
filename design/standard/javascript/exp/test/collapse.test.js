@@ -99,6 +99,35 @@
         return saved.then(function (value) { t.equal(value, 'hidden', 'values[collapsed]'); });
     });
 
+    test('collapse: a link without href becomes a button that Enter and Space toggle', function (t) {
+        sandbox('<a id="c-link">x</a><div id="c-box" style="width: 100px"></div>');
+        Exp.collapse({ link: '#c-link', collapsed: 0,
+            elements: [{ selector: '#c-box', duration: 0, fullStyle: { width: '100px' }, collapsedStyle: { width: '10px' } }] });
+        var link = document.getElementById('c-link');
+        t.equal(link.getAttribute('role'), 'button', 'role="button"');
+        t.equal(link.getAttribute('tabindex'), '0', 'tabindex="0"');
+        $(link).trigger($.Event('keydown', { key: 'Enter' }));
+        t.equal($('#c-box').css('width'), '10px', 'Enter collapsed it');
+        t.equal(link.getAttribute('aria-expanded'), 'false');
+        $(link).trigger($.Event('keydown', { key: ' ' }));
+        t.equal($('#c-box').css('width'), '100px', 'Space expanded it');
+        $(link).trigger($.Event('keydown', { key: 'a' }));
+        t.equal($('#c-box').css('width'), '100px', 'another key does nothing');
+    });
+
+    test('collapse: a real control and an element with its own role or tabindex keep them', function (t) {
+        sandbox('<a href="#" id="c-a">a</a><button type="button" id="c-b">b</button><span id="c-s" role="tab">s</span><span id="c-t" tabindex="-1">t</span>');
+        Exp.collapse({ link: '#c-a', collapsed: 0 });
+        Exp.collapse({ link: '#c-b', collapsed: 0 });
+        Exp.collapse({ link: '#c-s', collapsed: 0 });
+        Exp.collapse({ link: '#c-t', collapsed: 0 });
+        t.ok(!document.getElementById('c-a').hasAttribute('role') && !document.getElementById('c-a').hasAttribute('tabindex'), 'a link with href');
+        t.ok(!document.getElementById('c-b').hasAttribute('role'), 'a button');
+        t.equal(document.getElementById('c-s').getAttribute('role'), 'tab', 'its own role');
+        t.equal(document.getElementById('c-t').getAttribute('tabindex'), '-1', 'its own tabindex');
+        t.equal(document.getElementById('c-t').getAttribute('role'), 'button');
+    });
+
     test('collapse: $.fn.expCollapse sets it up on each element', function (t) {
         sandbox('<a href="#" class="c-many">a</a><a href="#" class="c-many">b</a>');
         $('.c-many').expCollapse({ collapsed: 0 });

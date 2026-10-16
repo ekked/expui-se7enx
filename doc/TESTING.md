@@ -13,7 +13,7 @@ session, the real ezjscore endpoint. Results show on the page and in
 `window.ExpTestResults`:
 
 ```js
-{ done: true, passed: 110, failed: 0, tests: [ { name, passed, error, assertions, ms }, … ] }
+{ done: true, passed: 116, failed: 0, tests: [ { name, passed, error, assertions, ms }, … ] }
 ```
 
 The page loads every packer key and every module stylesheet itself (with
@@ -27,14 +27,14 @@ siteaccess the user may open it on. The tests live in
 | `core.test.js` | 14 | jQuery 4 next to the page's jQuery, `Exp.config`, `Exp.i18n`, events, `register`/`start`, `keys`, `prefs` (saved and read back), merged configuration blocks, the core loaded once, environment |
 | `io.test.js` | 12 | `callString`, `call` (POST, GET, unknown function, invalid, aborted), `poll` (until, gives up), `form` (fields, lists, submitter, token), `url` |
 | `compat.test.js` | 4 | `$.ez()` on both jQuerys, callback and jqXHR, GET, single install |
-| `collapse.test.js` | 8 | styles at once and animated, `aria-expanded`, the template's state, function values, content, callbacks, the event, the preference, the plugin |
+| `collapse.test.js` | 10 | styles at once and animated, `aria-expanded`, a link without href as a button (role, tabindex, Enter and Space), the template's state, function values, content, callbacks, the event, the preference, the plugin |
 | `sticky.test.js` | 4 | a page without the form, fixing and unfixing, scrolling to the start, the plugin |
 | `dialog.test.js` | 15 | the native modal, focus, Escape and close, `dismissible`, Tab, the backdrop, sizes, `confirm`, `alert`, `url`, `form`, templates, events, scripts not run, stacking, `data-exp-dialog` |
 | `upload.test.js` | 10 | sizes and types, the chooser, one POST per file, a form's fields, refused files, Cancel, `parallel`, errors, drops, `data-exp-upload` |
 | `datatable.test.js` | 25 | helpers, markup, sorting, pagers, every source, messages, selection, column toggling, Table options, menu buttons, inline editing, the filter, the keyboard, the plugin, events |
 | `datepicker.test.js` | 10 | `showDatePicker()`, filling the fields, times, the selected date, months and limits, the keyboard, the first day, closing, the plugin, the icon |
 | `autosave.test.js` | 8 | the form state, saves and no-change, extra and forced saves, errors, `stop()`, leaving a field, `enabled`, `beforeSerialize`, the preview |
-| | **110** | |
+| | **116** | |
 
 The form, upload and dialog tests post to **`expui/test/echo`** (the test view
 with its `echo` action), which answers with the fields and files it received.

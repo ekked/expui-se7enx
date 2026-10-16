@@ -253,6 +253,10 @@ Exp.collapse({
 - `after*` runs when the first element's animation ends.
 - The link gets `aria-expanded`, and its click is handled (its `href` stays as
   the no-script fallback).
+- A link that is no control by itself (an `<a>` without `href`, a `<span>`) and
+  has no `role` also gets `role="button"` and `tabindex="0"` (unless it has its
+  own), and Enter and Space toggle it, so it is reached and used with the
+  keyboard like a button.
 - Each change emits `exp:collapse` with `{ link, collapsed }`.
 
 Instance: `collapse()`, `uncollapse()` (also `expand()`), `toggle()`,

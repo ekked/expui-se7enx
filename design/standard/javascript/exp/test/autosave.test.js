@@ -153,6 +153,8 @@
         t.ok(document.getElementById('preview-link'), 'the link');
         t.ok(document.getElementById('content-preview').classList.contains('loading'), 'loading at first');
         t.equal(document.getElementById('preview-link').textContent, 'P');
+        t.equal(document.getElementById('preview-link').getAttribute('role'), 'button', 'the link without href is a button');
+        t.equal(document.getElementById('preview-link').getAttribute('tabindex'), '0', 'the keyboard reaches it');
         $('#preview-link').trigger('click');
         return wait(Exp.reducedMotion ? 50 : 900).then(function () {
             Exp.off('autosubmit:forcesave', h);

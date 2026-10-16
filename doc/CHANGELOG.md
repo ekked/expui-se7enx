@@ -1,6 +1,16 @@
 Changelog
 =========
 
+1.0.0.7 (2026-10-16)
+--------------------
+
+Updated
+- `exp::collapse`: a link that is no control by itself (an `<a>` without
+  `href`, a `<span>`) and has no role of its own gets `role="button"` and
+  `tabindex="0"`, and Enter and Space toggle it. The autosave preview's link is
+  such a link: it is now reached with the keyboard, and its `aria-expanded` is
+  allowed on it. [modules/collapse.md](modules/collapse.md)
+
 1.0.0.4 (2026-10-02)
 --------------------
 

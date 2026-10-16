@@ -18,7 +18,9 @@
  *
  * A style value may be a function, called at the moment of the change. Sizes (px, em, rem, %, or plain numbers)
  * are animated; other values (no-repeat, unset) are set at once. With reduced motion everything is set at once.
- * The link gets aria-expanded. $(link).expCollapse(conf) does the same with conf.link = this element.
+ * The link gets aria-expanded. A link that is no control by itself (an <a> without href, a <span>) and has no role
+ * also gets role="button" and tabindex="0", and Enter and Space toggle it.
+ * $(link).expCollapse(conf) does the same with conf.link = this element.
  */
 (function (window) {
     'use strict';
@@ -41,11 +43,30 @@
         return { animate: animate, set: set, any: any };
     }
 
+    /** A control by itself: a button, a link with href, a form field, a summary. */
+    function isNative(el) {
+        var tag = el.tagName.toLowerCase();
+        return tag === 'button' || tag === 'input' || tag === 'select' || tag === 'textarea' || tag === 'summary'
+            || ((tag === 'a' || tag === 'area') && el.hasAttribute('href'));
+    }
+
     function Collapse(conf) {
         var self = this;
         this.conf = $.extend({ content: false, elements: [] }, conf);
         this.conf.collapsed = Number(this.conf.collapsed) ? 1 : 0;
         this.$link = $(this.conf.link);
+        // a link without href (or a span) is no control by itself: it becomes a button a keyboard can reach and use
+        this.$link.each(function () {
+            if (isNative(this) || this.hasAttribute('role')) { return; }
+            this.setAttribute('role', 'button');
+            if (!this.hasAttribute('tabindex')) { this.setAttribute('tabindex', '0'); }
+            $(this).on('keydown.expcollapse', function (e) {
+                if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+                    e.preventDefault();
+                    self.toggle();
+                }
+            });
+        });
         this.$link.attr('aria-expanded', this.conf.collapsed ? 'false' : 'true');
         this.$link.on('click.expcollapse', function (e) {
             e.preventDefault();
