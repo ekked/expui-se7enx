@@ -35,7 +35,7 @@
         t.equal($('#s-bar').hasClass('s-fixed'), true, 'below the start: fixed');
         s.onScroll();
         return wait(30).then(function () {
-            t.equal(parseFloat($('#s-top').css('opacity')), 0.6, '"go to the top" shown');
+            t.equal(parseFloat($('#s-top').css('opacity')), 0.85, '"go to the top" shown');
             window.scrollTo(0, 0);
             s.onScroll();
             t.equal($('#s-bar').hasClass('s-fixed'), false, 'unfixed again');

@@ -283,7 +283,7 @@ uses its class, so the admin's styles and other extensions keep working:
 | `className` | `'controlbar-fixed'` | the class it gets while fixed |
 | `toTop` | `'.scroll-to-top'` | faded in below the start, out above it; a click hides it |
 | `scrollToStart` | `true` | on load, scroll to the start and focus the form's first text field |
-| `toTopOpacity`, `fade` | `0.6`, `500` | the link's opacity, and its fade in ms (0 with reduced motion) |
+| `toTopOpacity`, `fade` | `0.85`, `500` | the link's opacity (the default keeps its text at a contrast of at least 4.5:1), and its fade in ms (0 with reduced motion) |
 
 Instance: `active` (`false` on a page without the form), `formY` (the scroll
 position where it fixes), `onScroll()`.

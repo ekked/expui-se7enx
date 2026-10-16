@@ -12,7 +12,7 @@ in view, with the same behaviour, so the admin's styles and other extensions tha
  *       className: 'controlbar-fixed',     the class the toolbar gets while fixed
  *       toTop: '.scroll-to-top',           faded in once the page is scrolled past the start, out above it
  *       scrollToStart: true,               on load, scroll to the start and focus the form's first text field
- *       toTopOpacity: 0.6, fade: 500       the link's opacity and its fade in ms (0 with reduced motion)
+ *       toTopOpacity: 0.85, fade: 500      the link's opacity and its fade in ms (0 with reduced motion)
  *   });
  *
  * Exp.sticky.admin() wires the admin's edit forms with exactly those defaults; exp::sticky runs it when the page is
@@ -27,7 +27,7 @@ in view, with the same behaviour, so the admin's styles and other extensions tha
 
     var DEFAULTS = {
         form: '#editform, #ClassEdit', start: '#columns', className: 'controlbar-fixed', toTop: '.scroll-to-top',
-        scrollToStart: true, toTopOpacity: 0.6, fade: 500
+        scrollToStart: true, toTopOpacity: 0.85, fade: 500
     };
 
     function px(v) { var n = parseInt(v, 10); return isNaN(n) ? 0 : n; }

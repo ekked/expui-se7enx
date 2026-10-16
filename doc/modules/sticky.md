@@ -67,7 +67,7 @@ Options
 | `className` | `'controlbar-fixed'` | the class while fixed |
 | `toTop` | `'.scroll-to-top'` | the "go to the top" link; a click on it hides it |
 | `scrollToStart` | `true` | on load: scroll to the start, focus the form's first text field |
-| `toTopOpacity` | `0.6` | the link's opacity when shown |
+| `toTopOpacity` | `0.85` | the link's opacity when shown; a lower one lets the page show through and can take its text below a contrast of 4.5:1 |
 | `fade` | `500` | the link's fade, in ms (0 with reduced motion) |
 
 The instance
