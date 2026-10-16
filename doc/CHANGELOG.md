@@ -7,7 +7,7 @@ Changelog
 Updated
 - `exp::sticky`: the "go to the top" link is shown at an opacity of 0.85
   (`toTopOpacity`, was 0.6). At 0.6 the page showed through so much that its
-  white text on the admin's ink colour fell to a contrast of 4.18:1, below the
+  white text on the admin's ink color fell to a contrast of 4.18:1, below the
   4.5:1 that text needs. [modules/sticky.md](modules/sticky.md)
 
 1.0.0.7 (2026-10-16)
