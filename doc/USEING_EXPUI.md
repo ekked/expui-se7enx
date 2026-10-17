@@ -1108,7 +1108,8 @@ Assertions: `t.ok(value)`, `t.equal(a, b)`, `t.deepEqual(a, b)`,
 a Promise (or use `async`) for anything that waits.
 
 Run them on a page of your own module with the runner loaded after your code,
-a place for test markup, and a place for results:
+a place for test markup, and a place for results, then `exp/test/start.js`, which
+starts the tests when the API is ready (a file, so the page needs no inline script):
 
 ```html
 {exp_config()}
@@ -1116,7 +1117,7 @@ a place for test markup, and a place for results:
 <div id="exp-test-sandbox"></div>
 <p id="exp-test-summary"></p>
 <ol id="exp-test-results"></ol>
-<script>{literal}Exp.ready(function () { ExpTest.run(); });{/literal}</script>
+{ezscript( array( 'exp/test/start.js' ) )}
 ```
 
 The results also land in `window.ExpTestResults`

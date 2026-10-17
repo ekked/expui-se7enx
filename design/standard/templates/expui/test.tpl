@@ -23,8 +23,5 @@
 
 </div>
 
-<script type="text/javascript">
-{literal}
-if (window.ExpTest) { window.Exp && window.Exp.ready ? window.Exp.ready(function () { window.ExpTest.run(); }) : window.ExpTest.run(); }
-{/literal}
-</script>
+{* the tests start here, after the results list (exp/test/start.js; no inline script) *}
+{ezscript( array( 'exp/test/start.js' ) )}

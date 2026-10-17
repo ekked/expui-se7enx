@@ -23,6 +23,7 @@ siteaccess the user may open it on. The tests live in
 
 | File | Tests | Covers |
 |---|---|---|
+| `start.js` | | starts the tests once the Exp API is ready, printed after the results list (no inline script) |
 | `runner.js` | | the runner: `ExpTest.test(name, fn)`, assertions `ok`, `equal`, `deepEqual`, `throws`, `rejects(promise, kind)`; a test times out after 15 s |
 | `core.test.js` | 14 | jQuery 4 next to the page's jQuery, `Exp.config`, `Exp.i18n`, events, `register`/`start`, `keys`, `prefs` (saved and read back), merged configuration blocks, the core loaded once, environment |
 | `io.test.js` | 12 | `callString`, `call` (POST, GET, unknown function, invalid, aborted), `poll` (until, gives up), `form` (fields, lists, submitter, token), `url` |

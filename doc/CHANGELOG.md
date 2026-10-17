@@ -1,6 +1,14 @@
 Changelog
 =========
 
+1.0.0.10 (2026-10-17)
+---------------------
+
+Updated
+- `expui/test`: the tests start from a file, `exp/test/start.js`, instead of an
+  inline script, so the test page runs under a Content Security Policy without
+  `unsafe-inline`. [TESTING.md](TESTING.md)
+
 1.0.0.8 (2026-10-16)
 --------------------
 
