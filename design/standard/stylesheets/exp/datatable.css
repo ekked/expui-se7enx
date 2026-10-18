@@ -103,6 +103,9 @@
 .exp-dt-pager::after { content: ""; display: block; clear: both; }
 .exp-dt-pager .exp-dt-backward { float: left; }
 .exp-dt-pager .exp-dt-forward { float: right; }
+/* right to left the backward buttons (first, previous) stand at the right and the forward ones at the left */
+:where([dir="rtl"]) .exp-dt-pager .exp-dt-backward { float: right; }
+:where([dir="rtl"]) .exp-dt-pager .exp-dt-forward { float: left; }
 .exp-dt-pager-compact { margin-top: 0; }
 .exp-dt-pager-compact::after { display: none; }
 .exp-dt-first, .exp-dt-prev, .exp-dt-next, .exp-dt-last {
