@@ -77,7 +77,12 @@ in view, with the same behaviour, so the admin's styles and other extensions tha
         $(window).on('scroll.expsticky', onScroll);
         if (o.scrollToStart && (window.scrollY || window.pageYOffset || 0) < formY) {
             window.scrollTo(0, formY + 1);
-            $form.find('input[type=text]:enabled').first().trigger('focus');
+            // focused without scrolling again: on a page with scroll-padding-top (a fixed header) the browser would
+            // scroll the field to the middle of the window and undo the scroll to the start
+            var field = $form.find('input[type=text]:enabled').get(0);
+            if (field) {
+                try { field.focus({ preventScroll: true }); } catch (e) { field.focus(); }
+            }
         }
         onScroll();
         $toolbar.data('expSticky', this);

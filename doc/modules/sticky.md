@@ -90,7 +90,9 @@ Keyboard and screen readers
 
 Nothing changes in the toolbar itself: its buttons stay where Tab finds them.
 With `scrollToStart` the focus starts in the form's first text field, as with
-`fixed_toolbar.js`. The link's fade follows `prefers-reduced-motion`.
+`fixed_toolbar.js`, without scrolling the page again (`preventScroll`): a page
+with `scroll-padding-top`, such as admin4's fixed header, would otherwise
+scroll the field to the middle of the window. The link's fade follows `prefers-reduced-motion`.
 
 From YUI
 --------
