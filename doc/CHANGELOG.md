@@ -1,6 +1,21 @@
 Changelog
 =========
 
+1.0.0.11 (2026-10-18)
+---------------------
+
+Updated
+- `expui/test` under an enforced Content Security Policy without
+  `'unsafe-inline'`: the three tests that need inline scripts (a dialog with
+  `scripts: true`, the classic `onclick` calendar icon by click and by keyboard)
+  report "N/A under enforced CSP" with the reason instead of failing; they still
+  run where the policy allows inline scripts. The runner has `t.skip(reason)`,
+  `t.needsInlineScripts(what)` and `ExpTest.inlineScripts()`, and
+  `ExpTestResults` counts `skipped`. The dialog test is split: "not run by
+  default" runs under every policy. [TESTING.md](TESTING.md)
+- The version in `Exp.version` and `expUIServerFunctions::VERSION` agrees with
+  `ezinfo.php` and `extension.xml` again (they still said 1.0.0.8).
+
 1.0.0.10 (2026-10-17)
 ---------------------
 
