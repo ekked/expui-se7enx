@@ -7,6 +7,7 @@
          data-siteaccess="{$expected_siteaccess|wash}"
          data-root="{$expected_root|wash}"
          data-pref="{$test_pref|wash}"
+         data-inline-scripts="{$inline_scripts|wash}"
          data-close="{'Close'|i18n( 'extension/expui' )|wash}"></div>
     <input id="exp-test-input" type="text" aria-label="Test field" />
     <div id="exp-test-sandbox"></div>

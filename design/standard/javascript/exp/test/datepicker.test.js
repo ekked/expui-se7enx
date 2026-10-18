@@ -26,6 +26,7 @@
     }
 
     test('datepicker: showDatePicker() opens the calendar in the template\'s container', function (t) {
+        t.needsInlineScripts('the classic date templates\' calendar icon (onclick="showDatePicker(...)")');
         fields(true);
         t.ok(window.showDatePicker && window.showDatePicker.exp, 'showDatePicker is Exponential UI\'s');
         document.getElementById('T_datetime_cal_9').click();
@@ -155,6 +156,7 @@
     });
 
     test('datepicker: the calendar icon is reachable with the keyboard', function (t) {
+        t.needsInlineScripts('the classic date templates\' calendar icon (onclick="showDatePicker(...)")');
         fields(true);
         var icon = document.getElementById('T_datetime_cal_9');
         $(icon).attr({ tabindex: '0', role: 'button' });

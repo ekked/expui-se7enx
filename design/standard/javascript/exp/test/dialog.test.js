@@ -205,17 +205,23 @@
         });
     });
 
-    test('dialog: scripts in HTML content are not run, unless scripts: true', function (t) {
+    test('dialog: scripts in HTML content are not run by default', function (t) {
         window.__expDialogScript = 0;
         var p1 = Exp.dialog.open({ title: 'S', content: '<p>x</p><script>window.__expDialogScript++;<\/script>' });
         var first = window.__expDialogScript;
-        p1.dialog.close();
+        p1.dialog.close();                           // closed before the checks, so a failure leaves no dialog open
+        t.equal(first, 0, 'not run by default');
+        return p1;
+    });
+
+    test('dialog: scripts in HTML content are run with scripts: true', function (t) {
+        t.needsInlineScripts('scripts: true (an inline <script> in the content)');
+        window.__expDialogScript = 0;
         var p2 = Exp.dialog.open({ title: 'S', scripts: true, content: '<p>x</p><script>window.__expDialogScript++;<\/script>' });
         var second = window.__expDialogScript;
-        p2.dialog.close();                           // closed before the checks, so a failure leaves no dialog open
-        t.equal(first, 0, 'not run by default');
+        p2.dialog.close();
         t.equal(second, 1, 'run with scripts: true');
-        return Promise.all([p1, p2]);
+        return p2;
     });
 
     test('dialog: a dialog opened from a dialog stacks on top; closeAll closes both', function (t) {

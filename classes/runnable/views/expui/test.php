@@ -58,6 +58,10 @@ class Test extends \Exponential\Runnable\ModuleView
         $tpl->setVariable( 'expected_siteaccess', is_array( \eZSiteAccess::current() ) ? \eZSiteAccess::current()['name'] : '' );
         $tpl->setVariable( 'expected_root', \eZSys::indexDir() . '/' );
         $tpl->setVariable( 'test_pref', (string)\eZPreferences::value( 'exp_test_pref' ) );
+        // whether inline scripts run under this page's Content Security Policy (the kernel's, when it has one): the tests
+        // that need them report "N/A under enforced CSP" where they do not; '' (unknown) lets the runner probe
+        $tpl->setVariable( 'inline_scripts', class_exists( 'expContentSecurityPolicy' ) && method_exists( 'expContentSecurityPolicy', 'allowsInlineScripts' )
+                                              ? ( \expContentSecurityPolicy::allowsInlineScripts() ? '1' : '0' ) : '' );
 
         $Result = array();
         $Result['content'] = $tpl->fetch( 'design:expui/test.tpl' );

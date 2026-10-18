@@ -4,16 +4,32 @@
  *
  *   ExpTest.test('name', async function (t) { t.ok(x); t.equal(a, b); await t.rejects(promise, 'kind'); });
  *
- * Results go into #exp-test-results and window.ExpTestResults ({done, passed, failed, tests: [...]}), which the
- * Playwright check reads. Tests run one after another, in the order they were added.
+ * Results go into #exp-test-results and window.ExpTestResults ({done, passed, failed, skipped, tests: [...]}), which
+ * the Playwright check reads. Tests run one after another, in the order they were added.
+ *
+ * A test the page cannot run calls t.skip(reason): it is reported as skipped ("N/A", with the reason; passed: true,
+ * skipped: true), counted in skipped, not in passed or failed. ExpTest.inlineScripts() says whether the page's Content
+ * Security Policy lets inline scripts run (a <script> element without nonce, an on...= attribute): the server's
+ * answer (data-inline-scripts on #exp-test-expected), else a probe.
  */
 (function (window, document) {
     'use strict';
 
     var queue = [];
-    var results = window.ExpTestResults = { done: false, passed: 0, failed: 0, tests: [] };
+    var results = window.ExpTestResults = { done: false, passed: 0, failed: 0, skipped: 0, tests: [] };
+    var inline = null;
+
+    /** thrown by t.skip(): the test is not run here, for the reason given */
+    function Skip(reason) { this.reason = String(reason || 'skipped'); }
 
     function Assert(name) { this.name = name; this.count = 0; }
+    Assert.prototype.skip = function (reason) { throw new Skip(reason); };
+    /** skips the test unless inline scripts run on this page (see inlineScripts()) */
+    Assert.prototype.needsInlineScripts = function (what) {
+        if (!inlineScripts()) {
+            throw new Skip('N/A under enforced CSP: ' + what + ' needs inline scripts, which the page\'s Content Security Policy blocks (script-src without \'unsafe-inline\')');
+        }
+    };
     Assert.prototype.ok = function (value, message) {
         this.count++;
         if (!value) { throw new Error(message || 'expected a true value'); }
@@ -39,12 +55,38 @@
                             function (e) { if (kind && (!e || e.kind !== kind)) { throw new Error((message ? message + ': ' : '') + 'expected kind ' + kind + ', got ' + (e && e.kind) + ' (' + (e && e.message) + ')'); } return e; });
     };
 
+    /**
+     * Whether inline scripts run on this page: false when the server says its enforced policy blocks them
+     * (data-inline-scripts="0"), true when it says they run ("1"); without the server's answer (an older kernel, a
+     * policy set by the web server) a probe: an on...= attribute that a policy without 'unsafe-inline' does not run.
+     */
+    function inlineScripts() {
+        if (inline !== null) { return inline; }
+        var expected = document.getElementById('exp-test-expected');
+        var said = expected ? expected.getAttribute('data-inline-scripts') : null;
+        if (said === '0' || said === '1') {
+            inline = said === '1';
+        } else {
+            var probe = document.createElement('button');
+            probe.type = 'button'; probe.hidden = true;
+            probe.setAttribute('onclick', 'window.__expTestInlineProbe = true;');
+            window.__expTestInlineProbe = false;
+            document.body.appendChild(probe);
+            probe.click();
+            probe.parentNode.removeChild(probe);
+            inline = window.__expTestInlineProbe === true;
+            try { delete window.__expTestInlineProbe; } catch (e) { window.__expTestInlineProbe = undefined; }
+        }
+        return inline;
+    }
+
     function row(test) {
         var list = document.getElementById('exp-test-results');
         if (!list) { return; }
         var li = document.createElement('li');
-        li.className = test.passed ? 'is-pass' : 'is-fail';
-        li.textContent = (test.passed ? 'PASS ' : 'FAIL ') + test.name + (test.passed ? ' (' + test.assertions + ')' : ': ' + test.error) + ' ' + test.ms + ' ms';
+        li.className = test.skipped ? 'is-skip' : (test.passed ? 'is-pass' : 'is-fail');
+        li.textContent = test.skipped ? 'N/A ' + test.name + ': ' + test.reason
+                                      : (test.passed ? 'PASS ' : 'FAIL ') + test.name + (test.passed ? ' (' + test.assertions + ')' : ': ' + test.error) + ' ' + test.ms + ' ms';
         list.appendChild(li);
     }
 
@@ -54,14 +96,19 @@
             if (i >= queue.length) {
                 results.done = true;
                 var sum = document.getElementById('exp-test-summary');
-                if (sum) { sum.textContent = results.passed + ' passed, ' + results.failed + ' failed'; sum.className = results.failed ? 'is-fail' : 'is-pass'; }
+                if (sum) {
+                    sum.textContent = results.passed + ' passed, ' + results.failed + ' failed' + (results.skipped ? ', ' + results.skipped + ' not applicable here' : '');
+                    sum.className = results.failed ? 'is-fail' : 'is-pass';
+                }
                 return;
             }
             var item = queue[i++], t = new Assert(item.name), start = Date.now();
             var done = function (error) {
-                var test = { name: item.name, passed: !error, error: error ? String(error.message || error) : '', assertions: t.count, ms: Date.now() - start };
+                var skipped = error instanceof Skip;
+                var test = { name: item.name, passed: !error || skipped, error: error && !skipped ? String(error.message || error) : '', assertions: t.count, ms: Date.now() - start };
+                if (skipped) { test.skipped = true; test.reason = error.reason; }
                 results.tests.push(test);
-                results[test.passed ? 'passed' : 'failed']++;
+                results[skipped ? 'skipped' : (test.passed ? 'passed' : 'failed')]++;
                 row(test);
                 next();
             };
@@ -73,6 +120,7 @@
 
     window.ExpTest = {
         test: function (name, fn) { queue.push({ name: name, fn: fn }); },
+        inlineScripts: inlineScripts,
         run: run
     };
 }(window, document));

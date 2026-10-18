@@ -30,4 +30,5 @@
 .exp-test #exp-test-results { font-family: var(--exp-mono); font-size: 0.85em; }
 .exp-test #exp-test-results .is-pass { color: var(--exp-ok); }
 .exp-test #exp-test-results .is-fail { color: var(--exp-bad); font-weight: 600; }
+.exp-test #exp-test-results .is-skip { color: var(--exp-muted); font-style: italic; }
 .exp-test #exp-test-input { position: absolute; left: -9999px; }
