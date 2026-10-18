@@ -1,6 +1,17 @@
 Changelog
 =========
 
+1.0.0.12 (2026-10-18)
+---------------------
+
+Updated
+- `exp::sticky`: `scrollToStart` focuses the form's first text field without
+  scrolling again (`focus({ preventScroll: true })`). On a page with
+  `scroll-padding-top`, such as admin4's and admin4l's fixed header, the focus
+  scrolled the field to the middle of the window and undid the scroll to the
+  start; the test "scrolls to the start and focuses the first text field" failed
+  there. [modules/sticky.md](modules/sticky.md)
+
 1.0.0.11 (2026-10-18)
 ---------------------
 
