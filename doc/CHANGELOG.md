@@ -1,6 +1,12 @@
 Changelog
 =========
 
+1.0.0.13 (2026-10-19)
+---------------------
+
+Added
+- Translations in Croatian, Czech, Danish, Dutch, Italian, Norwegian, Polish, Brazilian Portuguese, Swedish and Turkish.
+
 1.0.0.12 (2026-10-18)
 ---------------------
 
