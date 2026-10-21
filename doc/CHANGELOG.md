@@ -1,6 +1,20 @@
 Changelog
 =========
 
+1.0.0.14 (2026-10-20)
+---------------------
+
+Added
+- Translations in French, Ukrainian, Arabic, Persian, Pashto and Kurdish (Kurmanji) (pull requests #1, #2 and
+  #5). Pull request #4 (the ten languages of 1.0.0.13) is merged too; their released wording is kept.
+
+Fixed
+- `exp::datatable`: right to left (Arabic, Hebrew, Persian) the full pager puts first and previous at the right
+  and next and last at the left, as the top pager and admin4's mirrored arrows already did (pull request #3).
+  The groups float to `inline-start` and `inline-end`, so a left to right table inside a right to left page keeps
+  its order; browsers without those values use the `[dir="rtl"]` rules. A browser test covers all three cases.
+  [modules/datatable.md](modules/datatable.md#styles)
+
 1.0.0.13 (2026-10-19)
 ---------------------
 
