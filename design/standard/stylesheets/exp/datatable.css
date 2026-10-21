@@ -101,11 +101,15 @@
 .exp-dt-pager { display: block; margin-top: 10px; text-align: center; }
 .exp-dt-pager[hidden] { display: none; }
 .exp-dt-pager::after { content: ""; display: block; clear: both; }
-.exp-dt-pager .exp-dt-backward { float: left; }
-.exp-dt-pager .exp-dt-forward { float: right; }
-/* right to left the backward buttons (first, previous) stand at the right and the forward ones at the left */
-:where([dir="rtl"]) .exp-dt-pager .exp-dt-backward { float: right; }
-:where([dir="rtl"]) .exp-dt-pager .exp-dt-forward { float: left; }
+.exp-dt-pager .exp-dt-backward { float: left; float: inline-start; }
+.exp-dt-pager .exp-dt-forward { float: right; float: inline-end; }
+/* right to left the backward buttons (first, previous) stand at the right and the forward ones at the left:
+   inline-start/inline-end follow the direction of the pager itself, also an ltr table inside an rtl page;
+   a browser without them falls back to the nearest dir attribute */
+@supports not (float: inline-start) {
+    :where([dir="rtl"]) .exp-dt-pager .exp-dt-backward { float: right; }
+    :where([dir="rtl"]) .exp-dt-pager .exp-dt-forward { float: left; }
+}
 .exp-dt-pager-compact { margin-top: 0; }
 .exp-dt-pager-compact::after { display: none; }
 .exp-dt-first, .exp-dt-prev, .exp-dt-next, .exp-dt-last {

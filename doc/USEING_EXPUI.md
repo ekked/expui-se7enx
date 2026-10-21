@@ -149,7 +149,7 @@ php bin/php/ezcache.php --clear-all
 ```
 
 Open **`/expui/test`** in the admin. It runs every test of the API on a real
-page and should end with **110 passed, 0 failed**.
+page and should end with **118 passed, 0 failed**.
 
 > [!NOTE]
 > **Why "before ezjscore"?** When two extensions set the same setting, the one

@@ -345,7 +345,9 @@ Styles
 ------
 
 `exp/datatable.css` draws the look the admin gave YUI's table: a dark header, striped rows, the
-pager buttons, the menus and the dialog. The `<table>` sits in a `.exp-dt-scroll` element, so a table wider
+pager buttons, the menus and the dialog. The full pager puts first and previous at the start of the line and
+next and last at its end, so right to left (`dir="rtl"`, Arabic, Hebrew, Persian) they swap sides; it follows the
+direction of the pager itself, so a left to right table inside a right to left page keeps its order. The `<table>` sits in a `.exp-dt-scroll` element, so a table wider
 than its column (a narrow window, a large zoom) scrolls sideways inside the column instead of running over
 the next one. Every colour is a custom property on `.exp-dt` (and on its toolbar, pagers and
 dialog): `--exp-dt-head`, `--exp-dt-head-sortable`, `--exp-dt-head-sorted`, `--exp-dt-head-ink`,

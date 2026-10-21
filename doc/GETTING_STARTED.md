@@ -11,10 +11,10 @@ After [installing](INSTALL.md), open the admin and go to **`/expui/test`**
 (for example `https://example.com/admin/expui/test`). The page runs every unit
 test of the API on a real admin page. It should end with:
 
-> **117 passed, 0 failed**
+> **118 passed, 0 failed**
 
 (Under an enforced Content Security Policy without `'unsafe-inline'`, such as
-Exponential's admin4 and admin4l: *114 passed, 0 failed, 3 not applicable here*;
+Exponential's admin4 and admin4l: *115 passed, 0 failed, 3 not applicable here*;
 see [TESTING.md](TESTING.md).)
 
 If it does not, the failing test's name says what is wrong; see the

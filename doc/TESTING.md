@@ -13,7 +13,7 @@ session, the real ezjscore endpoint. Results show on the page and in
 `window.ExpTestResults`:
 
 ```js
-{ done: true, passed: 117, failed: 0, skipped: 0, tests: [ { name, passed, error, assertions, ms }, … ] }
+{ done: true, passed: 118, failed: 0, skipped: 0, tests: [ { name, passed, error, assertions, ms }, … ] }
 ```
 
 **Under an enforced Content Security Policy** whose `script-src` has no
@@ -23,7 +23,7 @@ cannot run, by design: a dialog with `scripts: true` (it runs the inline
 `onclick="showDatePicker(...)"` attribute is an inline handler (opened by click
 and by keyboard). They report **N/A under enforced CSP** with the reason,
 counted in `skipped` (each has `skipped: true`, `reason`), and the page ends with
-*114 passed, 0 failed, 3 not applicable here*. Where the policy allows inline
+*115 passed, 0 failed, 3 not applicable here*. Where the policy allows inline
 scripts (report-only, no policy, a classic design) they run as before. The test
 view asks the kernel (`expContentSecurityPolicy::allowsInlineScripts()`, in
 `data-inline-scripts`); on a kernel without it the runner probes with an
@@ -46,10 +46,10 @@ siteaccess the user may open it on. The tests live in
 | `sticky.test.js` | 4 | a page without the form, fixing and unfixing, scrolling to the start, the plugin |
 | `dialog.test.js` | 16 | the native modal, focus, Escape and close, `dismissible`, Tab, the backdrop, sizes, `confirm`, `alert`, `url`, `form`, templates, events, scripts not run, stacking, `data-exp-dialog` |
 | `upload.test.js` | 10 | sizes and types, the chooser, one POST per file, a form's fields, refused files, Cancel, `parallel`, errors, drops, `data-exp-upload` |
-| `datatable.test.js` | 25 | helpers, markup, sorting, pagers, every source, messages, selection, column toggling, Table options, menu buttons, inline editing, the filter, the keyboard, the plugin, events |
+| `datatable.test.js` | 26 | helpers, markup, sorting, pagers (also right to left), every source, messages, selection, column toggling, Table options, menu buttons, inline editing, the filter, the keyboard, the plugin, events |
 | `datepicker.test.js` | 10 | `showDatePicker()`, filling the fields, times, the selected date, months and limits, the keyboard, the first day, closing, the plugin, the icon |
 | `autosave.test.js` | 8 | the form state, saves and no-change, extra and forced saves, errors, `stop()`, leaving a field, `enabled`, `beforeSerialize`, the preview |
-| | **117** | |
+| | **118** | |
 
 The form, upload and dialog tests post to **`expui/test/echo`** (the test view
 with its `echo` action), which answers with the fields and files it received.

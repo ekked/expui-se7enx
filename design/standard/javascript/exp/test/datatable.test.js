@@ -157,6 +157,28 @@
         });
     });
 
+    test('datatable: right to left the full pager puts first/previous at the right and next/last at the left', function (t) {
+        // the wrapper names its direction, so the test means the same on a left to right and a right to left admin
+        sandbox('<div id="dir" dir="ltr"><div id="dt"></div><div id="bottom"></div></div>');
+        var $el = $('#dt'), loaded = onceEvent($el, 'exp:datatable:load');
+        $el.expDataTable({ columns: COLS, source: { rows: people() }, paging: { limit: 2, containers: ['#bottom'] } });
+        function sides() {
+            var nav = $('#bottom nav')[0].getBoundingClientRect(),
+                back = $('#bottom .exp-dt-backward')[0].getBoundingClientRect(),
+                fwd = $('#bottom .exp-dt-forward')[0].getBoundingClientRect();
+            return { back: back.left - nav.left < nav.right - back.right ? 'left' : 'right',
+                     fwd: fwd.left - nav.left < nav.right - fwd.right ? 'left' : 'right' };
+        }
+        return loaded.then(function () {
+            t.deepEqual(sides(), { back: 'left', fwd: 'right' }, 'left to right: first/previous at the left, next/last at the right');
+            $('#dir').attr('dir', 'rtl');
+            t.deepEqual(sides(), { back: 'right', fwd: 'left' }, 'right to left: first/previous at the right, next/last at the left');
+            $('#dir').attr('dir', 'ltr');
+            $('#dir').wrap('<div id="rtl-page" dir="rtl"></div>');
+            t.deepEqual(sides(), { back: 'left', fwd: 'right' }, 'a left to right table inside a right to left page keeps its own order');
+        });
+    });
+
     test('datatable: setting the same rows per page or page loads nothing', function (t) {
         var n = 0;
         return make({ source: function (s) { n++; var r = people(); return { rows: r.slice(s.offset, s.offset + s.limit), total: r.length }; } }).then(function (dt) {
