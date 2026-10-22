@@ -43,8 +43,8 @@ How a page gets the API
    | 1 | `exp::before` (inline) | remembers the page's `jQuery` and `$`, if any |
    | 2 | `lib/jquery/jquery-4.0.0.min.js` | jQuery 4 becomes `window.jQuery` for a moment |
    | 3 | `lib/jquery/jquery-migrate-4.0.2.js` | (while `Migrate=enabled`) attaches to it |
-   | 4 | `exp::boot` (inline) | checks it is jQuery 4, keeps it as `Exp.$`; if the page had another jQuery, `noConflict(true)` gives the page its `jQuery` and `$` back |
-   | 5 | `exp/core.js` | the core, on `Exp.$` |
+   | 4 | `exp::boot` (inline) | checks it is jQuery 4, keeps it as `Exp.$`; if the page had another jQuery, `noConflict(true)` gives the page its `jQuery` and `$` back; with no jQuery at all (`exp::core::shared` left it out and the page requested no `ezjsc::jquery`) it leaves `Exp.$` unset |
+   | 5 | `exp/core.js` | the core, on `Exp.$`, or on plain JavaScript without it |
 
    `exp::io`, `exp::compat` and the module keys (the names in
    `expUIServerFunctions::MODULES`) add their file the same way. The inline parts
@@ -85,6 +85,15 @@ extensions that set the same setting, the one listed first in
   They never see each other's plugins; `Exp.jQueryShared` is `false`.
 
 Module code is the same in both cases: it uses `Exp.$`.
+
+**No jQuery at all.** `exp::core::shared` on a page that requests no `ezjsc::jquery` brings no
+jQuery: `Exp.$` is `undefined`, and the core, `exp::io` and `exp::datatable` run on plain
+JavaScript with the same API (`fetch` instead of `jQuery.ajax()`, sent the same way;
+`Exp.datatable.create()` instead of `$.fn.expDataTable`). Where jQuery 4 is on the page they run
+on it, exactly as before; `exp::datatable` then binds its listeners through jQuery, so
+`.trigger()` reaches them, and keeps `$.fn.expDataTable` as the jQuery entry point. The other
+modules need jQuery and report it in the console when it is missing
+([API.md](API.md#without-jquery)).
 
 ezjscore loads Migrate together with jQuery only from the version whose
 `ezjscServerFunctionsJs::jquery()` adds the `jqueryMigrate` file; an older one
@@ -156,7 +165,10 @@ Writing a module
 (function (window) {
     'use strict';
     var Exp = window.Exp;
-    if (!Exp || !Exp.$) { return; }
+    if (!Exp || !Exp.$) {
+        if (Exp && Exp.ready && window.console) { window.console.error('Exp: exp::my-thing needs jQuery 4, and this page has none'); }
+        return;
+    }
     var $ = Exp.$;
 
     function MyThing($el, options) { /* … */ }
@@ -176,7 +188,10 @@ for it), its CSS under
 `stylesheets/exp/`, its texts in `[ExpUI] Strings` and the translations, its
 tests (see [TESTING.md](TESTING.md)), its page in `doc/modules/`.
 
-Rules every module keeps: jQuery 4 only; native elements first; works without
+A module that should also run without jQuery is written on the DOM (and `Exp.util`), as
+`exp/datatable.js` is, and offers its jQuery plugin only when `Exp.$` is there.
+
+Rules every module keeps: jQuery 4 only (or none); native elements first; works without
 JavaScript where the page did before; started from `data-exp-*`; accessible
 (ARIA, keyboard, focus); no `eval` or inline handlers; translated; Promises and
 namespaced events (`exp:<module>:<what>`); styled with the `--exp-*` tokens

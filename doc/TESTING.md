@@ -13,7 +13,7 @@ session, the real ezjscore endpoint. Results show on the page and in
 `window.ExpTestResults`:
 
 ```js
-{ done: true, passed: 118, failed: 0, skipped: 0, tests: [ { name, passed, error, assertions, ms }, … ] }
+{ done: true, passed: 125, failed: 0, skipped: 0, tests: [ { name, passed, error, assertions, ms }, … ] }
 ```
 
 **Under an enforced Content Security Policy** whose `script-src` has no
@@ -23,7 +23,7 @@ cannot run, by design: a dialog with `scripts: true` (it runs the inline
 `onclick="showDatePicker(...)"` attribute is an inline handler (opened by click
 and by keyboard). They report **N/A under enforced CSP** with the reason,
 counted in `skipped` (each has `skipped: true`, `reason`), and the page ends with
-*115 passed, 0 failed, 3 not applicable here*. Where the policy allows inline
+*122 passed, 0 failed, 3 not applicable here*. Where the policy allows inline
 scripts (report-only, no policy, a classic design) they run as before. The test
 view asks the kernel (`expContentSecurityPolicy::allowsInlineScripts()`, in
 `data-inline-scripts`); on a kernel without it the runner probes with an
@@ -38,18 +38,18 @@ siteaccess the user may open it on. The tests live in
 | File | Tests | Covers |
 |---|---|---|
 | `start.js` | | starts the tests once the Exp API is ready, printed after the results list (no inline script) |
-| `runner.js` | | the runner: `ExpTest.test(name, fn)`, assertions `ok`, `equal`, `deepEqual`, `throws`, `rejects(promise, kind)`, `skip(reason)`, `needsInlineScripts(what)`; `ExpTest.inlineScripts()`; a test times out after 15 s |
-| `core.test.js` | 14 | jQuery 4 next to the page's jQuery, `Exp.config`, `Exp.i18n`, events, `register`/`start`, `keys`, `prefs` (saved and read back), merged configuration blocks, the core loaded once, environment |
-| `io.test.js` | 12 | `callString`, `call` (POST, GET, unknown function, invalid, aborted), `poll` (until, gives up), `form` (fields, lists, submitter, token), `url` |
+| `runner.js` | | the runner: `ExpTest.test(name, fn)`, assertions `ok`, `equal`, `deepEqual`, `throws`, `rejects(promise, kind)`, `skip(reason)`, `needsInlineScripts(what)`; `ExpTest.inlineScripts()`; `ExpTest.bare(options)`, a same-origin frame without jQuery that loads `core.js`, `io.js`, `datatable.js` (and `options.modules`) one by one from the addresses on `#exp-test-bare`, and `ExpTest.unbare(win)`; a test times out after 15 s |
+| `core.test.js` | 16 | jQuery 4 next to the page's jQuery, `Exp.config`, `Exp.i18n`, events, `register`/`start`, `keys`, `prefs` (saved and read back), merged configuration blocks, the core loaded once, environment; without jQuery: the same API, `Exp.util`, `Exp.ready()`'s `$`, a module that needs jQuery saying so |
+| `io.test.js` | 14 | `callString`, `call` (POST, GET, unknown function, invalid, aborted), `poll` (until, gives up), `form` (fields, lists, submitter, token), `url`; without jQuery: the same through `fetch`, `raw()`, the fields encoded as `jQuery.param()` encodes them |
 | `compat.test.js` | 4 | `$.ez()` on both jQuerys, callback and jqXHR, GET, single install |
 | `collapse.test.js` | 10 | styles at once and animated, `aria-expanded`, a link without href as a button (role, tabindex, Enter and Space), the template's state, function values, content, callbacks, the event, the preference, the plugin |
 | `sticky.test.js` | 4 | a page without the form, fixing and unfixing, scrolling to the start, the plugin |
 | `dialog.test.js` | 16 | the native modal, focus, Escape and close, `dismissible`, Tab, the backdrop, sizes, `confirm`, `alert`, `url`, `form`, templates, events, scripts not run, stacking, `data-exp-dialog` |
 | `upload.test.js` | 10 | sizes and types, the chooser, one POST per file, a form's fields, refused files, Cancel, `parallel`, errors, drops, `data-exp-upload` |
-| `datatable.test.js` | 26 | helpers, markup, sorting, pagers (also right to left), every source, messages, selection, column toggling, Table options, menu buttons, inline editing, the filter, the keyboard, the plugin, events |
+| `datatable.test.js` | 29 | helpers, markup, sorting, pagers (also right to left), every source, messages, selection, column toggling, Table options, menu buttons, inline editing, the filter, the keyboard, the plugin, events; without jQuery: `Exp.datatable.create()` draws what `$.fn.expDataTable` draws, step by step, callbacks get elements, `CustomEvent`s; with jQuery: jQuery in the plugin's callbacks, each event once per listener |
 | `datepicker.test.js` | 10 | `showDatePicker()`, filling the fields, times, the selected date, months and limits, the keyboard, the first day, closing, the plugin, the icon |
 | `autosave.test.js` | 8 | the form state, saves and no-change, extra and forced saves, errors, `stop()`, leaving a field, `enabled`, `beforeSerialize`, the preview |
-| | **118** | |
+| | **125** | |
 
 The form, upload and dialog tests post to **`expui/test/echo`** (the test view
 with its `echo` action), which answers with the fields and files it received.
@@ -73,12 +73,12 @@ extension's own settings only.
 
 | Test | Tests | Covers |
 |---|---|---|
-| `ServerFunctionsTest` | 18 | the files `exp::core` stands for (local, CDN, with and without Migrate), their order, every module key putting its file in front, the cache times the packer needs (`exp::core` and every module), the inline snippets, the page configuration and its escaping |
+| `ServerFunctionsTest` | 19 | the files `exp::core` stands for (local, CDN, with and without Migrate), their order, every module key putting its file in front, the cache times the packer needs (`exp::core` and every module), the inline snippets (the boot leaving `Exp.$` unset on a page without jQuery), the page configuration and its escaping |
 | `TemplateOperatorTest` | 3 | `{exp_config()}` with and without options |
 | `PageJqueryTest` | 6 | `ezjsc::jquery` as expui sets it: jQuery 4 and Migrate 4, local and from the CDN; the kernel's `jquery()` adding Migrate right after jQuery, and only when it is named; the boot reusing a page's jQuery 4 |
 | `ShippedFilesTest` | 12 | the settings ezjscore and the kernel read; the files behind `ezjsc::jquery`, `jqueryMigrate` and `jqueryUI` (jQuery 4, Migrate 4, jQuery UI 1.14) and the same files as `exp::core`'s; the jQuery and jQuery UI files against their CDN integrity hashes; the files the packer keys `exp::core` and every module name; the admin loading every module and the stylesheets it names; every module's and test's JavaScript parses (when `node` is installed); every text in every catalogue; the versions agree |
 | `TestPageContentSecurityPolicyTest` | 3 | the test page under a Content Security Policy: the view's `inline_scripts`, the template's `data-inline-scripts`, the runner's skip and probe, the three tests that need inline scripts |
-| | **42** | |
+| | **43** | |
 
 Checking your own pages after the switch
 ----------------------------------------

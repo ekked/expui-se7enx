@@ -155,6 +155,14 @@ final class ServerFunctionsTest extends TestCase
         $this->assertStringContainsString( 'Exp.jQueryShared', $js );
     }
 
+    public function testBootLetsTheCoreRunWithoutJquery()
+    {
+        $js = expUIServerFunctions::boot( array() );
+        // exp::core::shared on a page that loads no jQuery: no error, Exp.$ stays undefined
+        $this->assertMatchesRegularExpression( '/if \\(!jq\\) \\{\\s*\/\/[^\\n]*\\n\\s*Exp\\.jQueryShared = false;\\s*return;/', $js );
+        $this->assertLessThan( strpos( $js, "console.error('Exp: jQuery 4 was expected" ), strpos( $js, 'if (!jq) {' ), 'before the version check' );
+    }
+
     public function testConfigShape()
     {
         $data = expUIServerFunctions::config();

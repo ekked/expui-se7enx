@@ -1,5 +1,5 @@
 /*!
- * Exponential UI (expui) — browser tests of exp::datatable ($.fn.expDataTable).
+ * Exponential UI (expui) — browser tests of exp::datatable ($.fn.expDataTable, and Exp.datatable.create() without jQuery).
  * GNU General Public License v2.0 (or any later version). https://github.com/se7enxweb/expui
  */
 (function (window, document) {
@@ -711,6 +711,145 @@
             $d.find('#dt-export').trigger('click');
             t.equal(clicked, 1, 'a footer button');
             dt.closeOptions();
+            sandbox('');
+        });
+    });
+
+    // ---- without jQuery: Exp.datatable.create() ---------------------------------------------------------------
+
+    /** The same table for both entry points: the window's own functions (no jQuery in them). */
+    function sameOptions(w) {
+        return {
+            columns: [{ key: 'id', label: 'ID', sortable: true, align: 'right' }, { key: 'name', label: 'Name', sortable: true, render: function (row) { return '<b>' + row.name + '</b>'; } },
+                      { key: 'age', label: 'Age', sortable: true, editable: 'number' }, { key: 'prio', label: 'Priority', hidden: true }],
+            source: { rows: people() }, rowKey: 'id', caption: 'People',
+            paging: { limit: 2, containers: ['#bp'], compact: ['#tp'] },
+            select: { name: 'Pick[]', value: function (r) { return r.id; }, label: function (r) { return r.name; } },
+            columnToggle: { shown: ['id', 'name', 'age'], save: function () {} },
+            inlineEdit: { save: function () { return w.Promise.resolve(); } },
+            actionsContainer: '#ac',
+            actions: [{ id: 'm-sel', label: 'Select', menu: [{ id: 'm-a', label: 'All', onSelect: function () { this.selectAll(true); } }] },
+                      { id: 'm-new', label: 'New', menu: [{ group: 'Content', items: [{ label: '<i>Folder</i>', html: true }] }] }],
+            tableOptions: { button: { id: 'm-opts', label: 'Options' }, container: '#oc', limits: { items: [{ id: 1, count: 2 }, { id: 2, count: 4 }] }, columns: {} }
+        };
+    }
+    var SAME_HTML = '<div id="ac"></div><div id="tp"></div><div id="tb"></div><div id="bp"></div><div id="oc"></div>';
+    /** the markup, without the ids a page counts up (they differ between two pages) */
+    function markup(host) { return host.innerHTML.replace(/exp-dt-options-\d+/g, 'exp-dt-options-N').replace(/-group-\d+/g, '-group-N'); }
+    function loadedIn(el) { return new Promise(function (r) { el.addEventListener('exp:datatable:load', function h(e) { el.removeEventListener('exp:datatable:load', h); r(e.detail); }); }); }
+    function click(el) { el.dispatchEvent(new el.ownerDocument.defaultView.MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })); }
+
+    test('datatable: without jQuery, Exp.datatable.create() draws what $.fn.expDataTable draws, step by step', function (t) {
+        var w, host = sandbox(SAME_HTML), there, a, b;
+        var both = function (fn) {
+            var pa = loadedIn(a.el), pb = loadedIn(b.el);
+            fn(host, a); fn(there, b);
+            return Promise.all([pa, pb]).then(function () { return wait(80); });
+        };
+        var same = function (what) { t.equal(markup(there), markup(host), what); };
+        return window.ExpTest.bare().then(function (win) {
+            w = win;
+            there = w.document.getElementById('sandbox');
+            there.innerHTML = SAME_HTML;
+            var pa = new Promise(function (r) { $('#tb').one('exp:datatable:load', r); });
+            $('#tb').expDataTable(sameOptions(window));
+            a = $('#tb').data('expDataTable');
+            var pb = loadedIn(w.document.getElementById('tb'));
+            b = w.Exp.datatable.create(w.document.getElementById('tb'), sameOptions(w));
+            t.equal(w.Exp.datatable.get(w.document.getElementById('tb')), b, 'Exp.datatable.get()');
+            return Promise.all([pa, pb]).then(function () { return wait(80); });
+        }).then(function () {
+            same('the first page');
+            return both(function (h) { click(h.querySelector('th[data-key=age] button.exp-dt-sort')); });
+        }).then(function () {
+            same('sorted by a header');
+            return both(function (h) { click(h.querySelector('#tp .exp-dt-next')); });
+        }).then(function () {
+            same('the next page');
+            return both(function (h) { click(h.querySelector('#bp .exp-dt-page[data-page="3"]')); });
+        }).then(function () {
+            same('a page link');
+            [host, there].forEach(function (h) { click(h.querySelector('tbody.exp-dt-body input[type=checkbox]')); });
+            same('a row selected');
+            [host, there].forEach(function (h) { click(h.querySelector('thead input.exp-dt-check-all')); });
+            same('select all');
+            [host, there].forEach(function (h) { click(h.querySelector('#m-new-button')); });
+            same('a menu with a group, opened');
+            [host, there].forEach(function (h) { h.querySelector('#m-new-button').dispatchEvent(new h.ownerDocument.defaultView.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+            same('closed with Escape');
+            [host, there].forEach(function (h) { click(h.querySelector('tbody.exp-dt-body td[data-key=age]')); });
+            same('the cell editor');
+            [host, there].forEach(function (h) {
+                var input = h.querySelector('input.exp-dt-editor');
+                input.value = '12';
+                input.dispatchEvent(new h.ownerDocument.defaultView.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+            });
+            same('a value saved');
+            a.hideColumn('name'); b.hideColumn('name'); a.showColumn('prio'); b.showColumn('prio');
+            same('columns hidden and shown');
+            return both(function (h) { click(h.querySelector('#m-opts-button')); click(h.querySelector('#table-option-row-btn-2')); });
+        }).then(function () {
+            same('Table options, four rows per page');
+            a.closeOptions(); b.closeOptions();
+            a.destroy(); b.destroy();
+            same('destroyed');
+            t.equal(w.Exp.datatable.get(w.document.getElementById('tb')), null, 'and forgotten');
+        }).finally(function () { window.ExpTest.unbare(w); sandbox(''); });
+    });
+
+    test('datatable: without jQuery, callbacks get elements and the events are CustomEvents', function (t) {
+        var w;
+        return window.ExpTest.bare().then(function (win) {
+            w = win;
+            var el = w.document.getElementById('sandbox'), cells = [], clicks = [], native = [], page = [];
+            el.addEventListener('exp:datatable:sort', function (e) { native.push(e.detail.key + ':' + e.detail.dir + ':' + (e.detail.table === el)); });
+            w.Exp.on('exp:datatable:sort', function (e, d) { page.push(d.key); });
+            var loaded = loadedIn(el);
+            var dt = w.Exp.datatable.create('#sandbox', {
+                columns: [{ key: 'name', label: 'Name', sortable: true, render: function (row, td, table) { cells.push(td.nodeType === 1 && !td.jquery && table === dt); return row.name; } }],
+                source: { rows: people() }, paging: { limit: 2 }, select: true,
+                actions: [{ id: 'push', label: 'Push', onClick: function (table, e) { clicks.push(table === dt && e instanceof w.Event); } }]
+            });
+            return loaded.then(function () {
+                t.ok(cells.length === 2 && cells.every(Boolean), 'render(row, td, table): the cell element');
+                t.ok(dt.table.tagName === 'TABLE' && dt.body.tagName === 'TBODY' && dt.root === el, 'the parts as elements');
+                t.equal(dt.$table, undefined, 'no jQuery properties without jQuery');
+                t.equal(Array.isArray(dt.checks()), true, 'checks(): an array');
+                t.equal(dt.rowData(dt.body.querySelector('tr')).name, 'Dora', 'rowData(tr)');
+                click(w.document.getElementById('push-button'));
+                t.deepEqual(clicks, [true], 'onClick(table, event): the browser\'s event');
+                var l = loadedIn(el);
+                click(el.querySelector('th[data-key=name] button'));
+                return l;
+            }).then(function () {
+                t.deepEqual(native, ['name:asc:true'], 'on the element: a CustomEvent, event.detail is the data');
+                t.deepEqual(page, ['name'], 'page-wide through Exp.on()');
+            });
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
+
+    test('datatable: with jQuery, the plugin\'s callbacks get jQuery and each event reaches every listener once', function (t) {
+        sandbox('<div id="dt"></div>');
+        var el = document.getElementById('dt'), $cells = [], viaJq = [], viaNative = [], created;
+        $(el).on('exp:datatable:load', function (e, d) { viaJq.push(d.total); });
+        el.addEventListener('exp:datatable:load', function (e) { viaNative.push(e.detail.total); });
+        var loaded = onceEvent($(el), 'exp:datatable:load');
+        $(el).expDataTable({ columns: [{ key: 'name', label: 'Name', render: function (row, $td) { $cells.push(!!$td.jquery); return row.name; } }],
+                             source: { rows: people() }, paging: { limit: 2 }, select: true });
+        return loaded.then(function () {
+            var dt = $(el).data('expDataTable');
+            t.ok($cells.length === 2 && $cells.every(Boolean), 'render(row, $td): jQuery');
+            t.ok(dt.$table.jquery && dt.$body.jquery && dt.$pagers.jquery, 'the jQuery properties');
+            t.ok(dt.checks().jquery, 'checks(): jQuery');
+            t.ok($.data(dt.body.querySelector('tr'), 'expRow') === dt.rowData(dt.body.querySelector('tr')), '$.data(tr, \'expRow\')');
+            t.deepEqual([viaJq, viaNative], [[5], [5]], 'once through jQuery, once natively');
+            created = Exp.datatable.create(el, { columns: [{ key: 'name', label: 'Name', render: function (row, td) { $cells.push(td.jquery ? 'jq' : 'el'); return row.name; } }],
+                                                 source: { rows: people() }, paging: { limit: 2 } });
+            return wait(30);
+        }).then(function () {
+            t.deepEqual($cells.slice(2), ['el', 'el'], 'Exp.datatable.create() on a jQuery page: elements');
+            t.equal($(el).data('expDataTable'), created, 'and $(el).data() has it');
+            t.equal($(el).expDataTable('page'), 1, 'the plugin\'s methods reach it');
             sandbox('');
         });
     });

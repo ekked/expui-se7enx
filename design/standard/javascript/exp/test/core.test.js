@@ -118,4 +118,59 @@
         t.ok(document.documentElement.classList.contains('exp-js'), '<html> has exp-js');
         t.equal(typeof Exp.reducedMotion, 'boolean', 'Exp.reducedMotion');
     });
+
+    // ---- without jQuery (exp::core::shared on a page that loads none) ------------------------------------------
+
+    test('core: without jQuery: Exp.$ is undefined, the rest works the same', function (t) {
+        var w;
+        return window.ExpTest.bare().then(function (win) {
+            w = win;
+            var X = w.Exp;
+            t.equal(w.jQuery, undefined, 'no jQuery in the frame');
+            t.equal(X.$, undefined, 'Exp.$');
+            t.equal(X.config.jquery, null, 'Exp.config.jquery');
+            t.equal(X.config.root, Exp.config.root, 'the configuration blocks');
+            t.equal(X.i18n('Close'), Exp.i18n('Close'), 'the texts');
+            t.equal(X.i18n('Exp test %n of %m', { '%n': 2, '%m': 3 }), 'Exp test 2 of 3', 'placeholders');
+            t.equal(X.prefs.get('exp_test_pref', ''), expected.pref, 'the preferences of the page');
+            t.equal(X.token(), Exp.token(), 'the form token');
+            t.ok(w.document.documentElement.classList.contains('exp-js'), '<html> has exp-js');
+            var got = [], fn = function (e, d) { got.push(e.type + ':' + d.n); };
+            X.on('exp:test:a.ns exp:test:b', fn).emit('exp:test:a', { n: 1 }).emit('exp:test:b', { n: 2 });
+            X.off('.ns').emit('exp:test:a', { n: 3 });
+            X.off('exp:test:b', fn).emit('exp:test:b', { n: 4 });
+            t.deepEqual(got, ['exp:test:a:1', 'exp:test:b:2'], 'events, several names, namespaces, off');
+            var box = w.document.getElementById('sandbox');
+            box.innerHTML = '<div id="p1" data-exp-plain=\'{"label":"one"}\'><span id="p2" data-exp-plain="two"></span></div>';
+            var seen = [];
+            X.register('plain', function (el, o) { seen.push(el.id + ':' + (o.label || o.value) + ':' + (this === el)); });
+            X.start(box);
+            t.deepEqual(seen, ['p1:one:true', 'p2:two:true'], 'modules get the element itself, once');
+            var calls = 0, id = X.keys.bind('ctrl+k', function () { calls++; return false; });
+            var e = new w.KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true });
+            w.document.body.dispatchEvent(e);
+            X.keys.unbind(id);
+            t.ok(calls === 1 && e.defaultPrevented, 'keys');
+            var fields = { a: 'x y', b: [1, [2]], c: { d: 3 }, e: null };
+            t.equal(X.util.param(fields), Exp.$.param(fields), 'Exp.util.param() as jQuery.param()');
+            t.equal(JSON.stringify(X.util.extend(true, {}, { a: { b: [1, 2] } }, { a: { b: [3] }, u: undefined })),
+                    JSON.stringify(Exp.$.extend(true, {}, { a: { b: [1, 2] } }, { a: { b: [3] }, u: undefined })), 'Exp.util.extend() as jQuery.extend()');
+            return new Promise(function (resolve) { X.ready(function ($) { resolve($); }); });
+        }).then(function ($) {
+            t.equal($, undefined, 'Exp.ready() hands over Exp.$, here undefined');
+            var value = 'b' + Date.now();
+            return w.Exp.prefs.set('exp_test_pref_bare', value).then(function (saved) { t.equal(saved, value, 'prefs.set through fetch'); });
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
+
+    test('core: without jQuery, a module that needs it says so in the console', function (t) {
+        var w, said = [];
+        return window.ExpTest.bare({ modules: ['dialog'], before: function (win) {
+            win.console.error = function (m) { said.push(String(m)); };
+        } }).then(function (win) {
+            w = win;
+            t.equal(w.Exp.dialog, undefined, 'exp::dialog is not set up');
+            t.ok(said.some(function (m) { return /exp::dialog needs jQuery/.test(m); }), 'and says why: ' + said.join(' | '));
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
 }(window, document));

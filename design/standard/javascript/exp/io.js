@@ -1,5 +1,5 @@
 /*!
- * Exponential UI (expui) io — server calls through ezjscore, on jQuery 4.
+ * Exponential UI (expui) io — server calls through ezjscore, on jQuery 4 or on fetch.
  * GNU General Public License v2.0 (or any later version). https://github.com/se7enxweb/expui
  *
  * Loaded by exp::io after exp::core. Talks to the same endpoint as $.ez() (ezjscore/call/),
@@ -13,12 +13,16 @@
  * A failed call rejects with an Exp.io.Error: {kind, status, message, response}; kind is one of
  * signedout (the session ended, status 401), refused (403), server (an HTTP error or error_text from the server
  * function), network (no answer, or aborted), timeout, invalid (bad arguments).
+ *
+ * With jQuery 4 (Exp.$) the requests go through jQuery.ajax(), as before. Without it (exp::core::shared on a page that
+ * loads no jQuery) they go through fetch (Exp.util.request()): the same address, method, fields, form token, headers
+ * and answers; raw() then returns a Promise (with abort()) instead of a jqXHR.
  */
 (function (window, document) {
     'use strict';
 
     var Exp = window.Exp;
-    if (!Exp || !Exp.$) { return; }
+    if (!Exp || !Exp.config || !Exp.util) { return; }
     var $ = Exp.$;
 
     function IOError(kind, status, message, response) {
@@ -31,6 +35,7 @@
     IOError.prototype = Object.create(Error.prototype);
     IOError.prototype.constructor = IOError;
 
+    /** xhr: the jqXHR, or without jQuery the object Exp.util.request() rejects with (status, responseText, responseURL) */
     function signedOut(xhr) {
         var url = xhr && xhr.responseURL ? xhr.responseURL : '';
         var text = xhr && typeof xhr.responseText === 'string' ? xhr.responseText : '';
@@ -67,7 +72,8 @@
     function token() { return Exp.token ? Exp.token() : ''; }
 
     /**
-     * The raw request: a jQuery 4 jqXHR resolving with the call view's JSON ({error_text, content}).
+     * The raw request: a jQuery 4 jqXHR resolving with the call view's JSON ({error_text, content}); without jQuery a
+     * Promise of that JSON, with abort(), rejecting with what Exp.util.request() rejects with.
      * opts: method (POST, or GET), data (more POST fields: object, array of {name, value}, or string), timeout.
      */
     function raw(call, opts) {
@@ -81,16 +87,22 @@
             } else if (typeof data === 'string') {
                 data += (data ? '&' : '') + 'ezjscServer_function_arguments=' + encodeURIComponent(call) + '&ezxform_token=' + encodeURIComponent(token());
             } else {
-                data = $.extend({}, data || {}, { ezjscServer_function_arguments: call, ezxform_token: token() });
+                data = Exp.util.extend({}, data || {}, { ezjscServer_function_arguments: call, ezxform_token: token() });
             }
         } else {
             url += encodeURIComponent(call);
             data = undefined;
         }
-        return $.ajax({
+        var request = {
             url: url, method: method, data: data, dataType: 'json', timeout: opts.timeout || 0,
             headers: { Accept: 'application/json,text/javascript,*/*' }
-        });
+        };
+        return $ ? $.ajax(request) : Exp.util.request(request);
+    }
+
+    /** A failed request as an Exp.io.Error: jQuery passes (jqXHR, textStatus), Exp.util.request() one object that has both. */
+    function failed(reject) {
+        return function (xhr, textStatus) { reject(failure(xhr, textStatus === undefined && xhr ? xhr.textStatus : textStatus)); };
     }
 
     function call(fn, args, opts) {
@@ -109,9 +121,7 @@
                 } else {
                     resolve(json.content);
                 }
-            }, function (xhr, textStatus) {
-                reject(failure(xhr, textStatus));
-            });
+            }, failed(reject));
         });
     }
 
@@ -121,15 +131,15 @@
      */
     function form(el, opts) {
         opts = opts || {};
-        var f = $(el)[0];
+        var f = $ ? $(el)[0] : (typeof el === 'string' ? document.querySelector(el) : (el && el.nodeType ? el : el && el[0]));
         if (!f || f.tagName !== 'FORM') { return Promise.reject(new IOError('invalid', 0, 'Exp.io.form: a form element is needed')); }
         var data = new FormData(f);
         if (opts.submitter && opts.submitter.name) { data.append(opts.submitter.name, opts.submitter.value || ''); }
         if (!data.has('ezxform_token') && token()) { data.append('ezxform_token', token()); }
+        var request = { url: opts.url || f.getAttribute('action') || window.location.href, method: (f.getAttribute('method') || 'POST').toUpperCase(),
+                        data: data, processData: false, contentType: false, timeout: opts.timeout || 0 };
         return new Promise(function (resolve, reject) {
-            $.ajax({ url: opts.url || f.getAttribute('action') || window.location.href, method: (f.getAttribute('method') || 'POST').toUpperCase(),
-                     data: data, processData: false, contentType: false, timeout: opts.timeout || 0 })
-                .then(function (response) { resolve(response); }, function (xhr, textStatus) { reject(failure(xhr, textStatus)); });
+            ($ ? $.ajax(request) : Exp.util.request(request)).then(function (response) { resolve(response); }, failed(reject));
         });
     }
 
