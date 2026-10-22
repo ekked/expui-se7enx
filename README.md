@@ -6,9 +6,9 @@ namespace, and one module per interactive feature of the admin and the site
 designs.** It replaces YUI 2 and YUI 3 feature by feature, without removing a
 single feature on the way.
 
-[![License: GPL v2 or later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg)](LICENSE.md)
-[![jQuery 4](https://img.shields.io/badge/jQuery-4.0-0769ad.svg)](https://jquery.com)
-[![Exponential 6](https://img.shields.io/badge/Exponential-6-f26a21.svg)](https://exponential.earth)
+[![License: GPL v2 or later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.png)](LICENSE.md)
+[![jQuery 4](https://img.shields.io/badge/jQuery-4.0-0769ad.png)](https://jquery.com)
+[![Exponential 6](https://img.shields.io/badge/Exponential-6-f26a21.png)](https://exponential.earth)
 
 ```html
 {exp_config()}
