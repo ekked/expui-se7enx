@@ -152,10 +152,33 @@ Exponential UI, as the kernel's templates now do:
 })();
 ```
 
+Without jQuery
+--------------
+
+`window.showDatePicker()`, `Exp.datepicker.open()` and `Exp.datepicker.create()` need no jQuery.
+The calendar, its markup, the keyboard, the focus and the values written into the fields are the
+same.
+
+```js
+var set = Exp.datepicker.create(document.getElementById('my-date'), { fields: { year: '.y', month: '.m', day: '.d' } });
+set.button;            // the button it added after the day field (or options.button)
+set.fields.year;       // the fields, as elements
+Exp.datepicker.get('#my-date') === set;
+```
+
+| | Without jQuery | With jQuery on the page (as before) |
+|---|---|---|
+| set up on a fieldset | `Exp.datepicker.create(box, options)` → `{ button, fields }` (elements) | also `$.fn.expDatePicker`, which keeps `{ button, fields }` with the fields in jQuery in `$(box).data('expDatePicker')` |
+| a field filled | its value, and a native `change` event that bubbles | `.val().trigger('change')`: jQuery's handlers and the `onchange` attribute |
+| the events' `fields` | elements, `null` for a missing time | jQuery objects (empty for a missing time), with `open()`, `showDatePicker()` and the plugin; `create()` hands over elements on either page |
+| listeners | `addEventListener` | jQuery's, so `.trigger()` reaches them |
+
+`Exp.datepicker.install(jQuery)` puts `$.fn.expDatePicker` on a jQuery loaded later.
+
 Tests
 -----
 
-`design/standard/javascript/exp/test/datepicker.test.js`, 10 tests on
+`design/standard/javascript/exp/test/datepicker.test.js`, 12 tests on
 `/expui/test`:
 
 - `showDatePicker()` opening in the template's container;
@@ -167,6 +190,8 @@ Tests
 - the first day of the week;
 - closing on an outside click;
 - `$.fn.expDatePicker`;
-- the icon with the keyboard.
+- the icon with the keyboard;
+- without jQuery (`ExpTest.bare()`): `create()`, the keyboard, the change events and the elements
+  in the events; `showDatePicker()` in its container, closed by a click outside.
 
 The date fields are also tested by use, as the note at the top says.

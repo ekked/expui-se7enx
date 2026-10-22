@@ -165,12 +165,35 @@
 
     test('core: without jQuery, a module that needs it says so in the console', function (t) {
         var w, said = [];
-        return window.ExpTest.bare({ modules: ['dialog'], before: function (win) {
+        return window.ExpTest.bare({ modules: ['compat'], before: function (win) {
             win.console.error = function (m) { said.push(String(m)); };
         } }).then(function (win) {
             w = win;
-            t.equal(w.Exp.dialog, undefined, 'exp::dialog is not set up');
-            t.ok(said.some(function (m) { return /exp::dialog needs jQuery/.test(m); }), 'and says why: ' + said.join(' | '));
+            t.equal(w.Exp.compat, undefined, 'exp::compat ($.ez() hands back a jqXHR) is not set up');
+            t.ok(said.some(function (m) { return /exp::compat needs jQuery/.test(m); }), 'and says why: ' + said.join(' | '));
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
+
+    test('core: without jQuery, the modules set up and say nothing', function (t) {
+        var w, said = [];
+        return window.ExpTest.bare({ modules: ['collapse', 'sticky', 'dialog', 'upload', 'datepicker', 'autosave'], before: function (win) {
+            win.console.error = function (m) { said.push(String(m)); };
+        } }).then(function (win) {
+            w = win;
+            var X = w.Exp;
+            t.ok(typeof X.collapse === 'function' && X.sticky.start && X.dialog.open && X.upload.create && X.datepicker.create && X.autosave.AutoSubmit, 'every module is there');
+            t.equal(typeof w.showDatePicker, 'function', 'showDatePicker() for the date templates');
+            t.deepEqual(said, [], 'no console error');
+            var el = w.document.getElementById('sandbox'), done = 0;
+            X.util.css(el, { width: 20, opacity: 0.5, marginLeft: '-1em', height: '-4px' });
+            t.deepEqual([el.style.width, el.style.opacity, el.style.marginLeft, el.style.height], ['20px', '0.5', '-1em', '0px'],
+                        'Exp.util.css(): px for numbers where jQuery adds it, no negative height');
+            X.util.animate(el, { opacity: 0 }, 0, function () { done++; });
+            t.ok(done === 1 && el.style.opacity === '0', 'Exp.util.animate() of 0 ms ends at once, as jQuery\'s');
+            X.util.animate(el, { width: '200px' }, 5000, function () { done++; });
+            t.equal(el.style.overflow, 'hidden', 'an animated width has overflow: hidden meanwhile');
+            X.util.stop(el, true);
+            t.ok(done === 2 && el.style.width === '200px' && el.style.overflow === '', 'Exp.util.stop(el, true) jumps to the end');
         }).finally(function () { window.ExpTest.unbare(w); });
     });
 }(window, document));

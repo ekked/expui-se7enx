@@ -13,7 +13,7 @@ session, the real ezjscore endpoint. Results show on the page and in
 `window.ExpTestResults`:
 
 ```js
-{ done: true, passed: 125, failed: 0, skipped: 0, tests: [ { name, passed, error, assertions, ms }, … ] }
+{ done: true, passed: 136, failed: 0, skipped: 0, tests: [ { name, passed, error, assertions, ms }, … ] }
 ```
 
 **Under an enforced Content Security Policy** whose `script-src` has no
@@ -23,7 +23,7 @@ cannot run, by design: a dialog with `scripts: true` (it runs the inline
 `onclick="showDatePicker(...)"` attribute is an inline handler (opened by click
 and by keyboard). They report **N/A under enforced CSP** with the reason,
 counted in `skipped` (each has `skipped: true`, `reason`), and the page ends with
-*122 passed, 0 failed, 3 not applicable here*. Where the policy allows inline
+*133 passed, 0 failed, 3 not applicable here*. Where the policy allows inline
 scripts (report-only, no policy, a classic design) they run as before. The test
 view asks the kernel (`expContentSecurityPolicy::allowsInlineScripts()`, in
 `data-inline-scripts`); on a kernel without it the runner probes with an
@@ -38,18 +38,18 @@ siteaccess the user may open it on. The tests live in
 | File | Tests | Covers |
 |---|---|---|
 | `start.js` | | starts the tests once the Exp API is ready, printed after the results list (no inline script) |
-| `runner.js` | | the runner: `ExpTest.test(name, fn)`, assertions `ok`, `equal`, `deepEqual`, `throws`, `rejects(promise, kind)`, `skip(reason)`, `needsInlineScripts(what)`; `ExpTest.inlineScripts()`; `ExpTest.bare(options)`, a same-origin frame without jQuery that loads `core.js`, `io.js`, `datatable.js` (and `options.modules`) one by one from the addresses on `#exp-test-bare`, and `ExpTest.unbare(win)`; a test times out after 15 s |
-| `core.test.js` | 16 | jQuery 4 next to the page's jQuery, `Exp.config`, `Exp.i18n`, events, `register`/`start`, `keys`, `prefs` (saved and read back), merged configuration blocks, the core loaded once, environment; without jQuery: the same API, `Exp.util`, `Exp.ready()`'s `$`, a module that needs jQuery saying so |
+| `runner.js` | | the runner: `ExpTest.test(name, fn)`, assertions `ok`, `equal`, `deepEqual`, `throws`, `rejects(promise, kind)`, `skip(reason)`, `needsInlineScripts(what)`; `ExpTest.inlineScripts()`; `ExpTest.bare(options)`, a same-origin frame without jQuery that loads `core.js`, `io.js`, `datatable.js` (and `options.modules`: `compat`, `collapse`, `sticky`, `dialog`, `upload`, `datepicker`, `autosave`) one by one from the addresses on `#exp-test-bare`, and `ExpTest.unbare(win)`; a test times out after 15 s |
+| `core.test.js` | 17 | jQuery 4 next to the page's jQuery, `Exp.config`, `Exp.i18n`, events, `register`/`start`, `keys`, `prefs` (saved and read back), merged configuration blocks, the core loaded once, environment; without jQuery: the same API, `Exp.util` (`css()`, `animate()`, `stop()` by jQuery's rules), `Exp.ready()`'s `$`, `exp::compat` saying it needs jQuery, every other module setting up silently |
 | `io.test.js` | 14 | `callString`, `call` (POST, GET, unknown function, invalid, aborted), `poll` (until, gives up), `form` (fields, lists, submitter, token), `url`; without jQuery: the same through `fetch`, `raw()`, the fields encoded as `jQuery.param()` encodes them |
 | `compat.test.js` | 4 | `$.ez()` on both jQuerys, callback and jqXHR, GET, single install |
-| `collapse.test.js` | 10 | styles at once and animated, `aria-expanded`, a link without href as a button (role, tabindex, Enter and Space), the template's state, function values, content, callbacks, the event, the preference, the plugin |
-| `sticky.test.js` | 4 | a page without the form, fixing and unfixing, scrolling to the start, the plugin |
-| `dialog.test.js` | 16 | the native modal, focus, Escape and close, `dismissible`, Tab, the backdrop, sizes, `confirm`, `alert`, `url`, `form`, templates, events, scripts not run, stacking, `data-exp-dialog` |
-| `upload.test.js` | 10 | sizes and types, the chooser, one POST per file, a form's fields, refused files, Cancel, `parallel`, errors, drops, `data-exp-upload` |
-| `datatable.test.js` | 29 | helpers, markup, sorting, pagers (also right to left), every source, messages, selection, column toggling, Table options, menu buttons, inline editing, the filter, the keyboard, the plugin, events; without jQuery: `Exp.datatable.create()` draws what `$.fn.expDataTable` draws, step by step, callbacks get elements, `CustomEvent`s; with jQuery: jQuery in the plugin's callbacks, each event once per listener |
-| `datepicker.test.js` | 10 | `showDatePicker()`, filling the fields, times, the selected date, months and limits, the keyboard, the first day, closing, the plugin, the icon |
-| `autosave.test.js` | 8 | the form state, saves and no-change, extra and forced saves, errors, `stop()`, leaving a field, `enabled`, `beforeSerialize`, the preview |
-| | **125** | |
+| `collapse.test.js` | 12 | styles at once and animated, `aria-expanded`, a link without href as a button (role, tabindex, Enter and Space), the template's state, function values, content, callbacks, the event, the preference, the plugin; without jQuery: the same, and the animation with `overflow: hidden` meanwhile |
+| `sticky.test.js` | 6 | a page without the form, fixing and unfixing, scrolling to the start, the plugin; without jQuery: fixing, unfixing and the fade, scrolling to the start and the focus |
+| `dialog.test.js` | 18 | the native modal, focus, Escape and close, `dismissible`, Tab, the backdrop, sizes, `confirm`, `alert`, `url`, `form`, templates, events, scripts not run, stacking, `data-exp-dialog`; without jQuery: the parts as elements, `CustomEvent`s, Escape and the focus back, a button's action with the browser's event, `load()` and `form()` through `fetch` |
+| `upload.test.js` | 11 | sizes and types, the chooser, one POST per file, a form's fields, refused files, Cancel, `parallel`, errors, drops, `data-exp-upload`; without jQuery: `Exp.upload.create()`, a POST per file with its data, the parts as elements, `CustomEvent`s, `destroy()` |
+| `datatable.test.js` | 33 | helpers, markup, sorting, pagers (also right to left), every source, messages, selection, column toggling, Table options, menu buttons, inline editing, the filter, the keyboard, the plugin, events; without jQuery: `Exp.datatable.create()` draws what `$.fn.expDataTable` draws, step by step, callbacks get elements, `CustomEvent`s; with jQuery: jQuery in the plugin's callbacks, each event once per listener |
+| `datepicker.test.js` | 12 | `showDatePicker()`, filling the fields, times, the selected date, months and limits, the keyboard, the first day, closing, the plugin, the icon; without jQuery: `Exp.datepicker.create()`, the keyboard, native change events, elements in the events, `showDatePicker()` and a click outside |
+| `autosave.test.js` | 9 | the form state, saves and no-change, extra and forced saves, errors, `stop()`, leaving a field, `enabled`, `beforeSerialize`, the preview; without jQuery: no change and a change saved through `fetch` with the token, the preview's parts as elements, opening and closing it |
+| | **136** | |
 
 The form, upload and dialog tests post to **`expui/test/echo`** (the test view
 with its `echo` action), which answers with the fields and files it received.

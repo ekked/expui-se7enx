@@ -133,4 +133,60 @@
         $('.c-many').expCollapse({ collapsed: 0 });
         t.equal($('.c-many').filter(function () { return !!$(this).data('expCollapse'); }).length, 2);
     });
+
+    // ---- without jQuery (exp::core::shared on a page that loads none) ------------------------------------------
+
+    test('collapse: without jQuery: the same styles, aria-expanded, keyboard, content, callbacks and event', function (t) {
+        var w;
+        return window.ExpTest.bare({ modules: ['collapse'] }).then(function (win) {
+            w = win;
+            var X = w.Exp, d = w.document, calls = [], seen = null;
+            t.equal(w.jQuery, undefined, 'no jQuery in the frame');
+            d.getElementById('sandbox').innerHTML = '<span id="c-link">x</span><div id="c-box" style="width: 100px"></div>';
+            X.on('exp:collapse', function (e, data) { seen = data; });
+            var c = X.collapse({ link: '#c-link', collapsed: '0', content: ['Hide', 'Show'],
+                beforecollapse: function () { calls.push('before'); }, aftercollapse: function () { calls.push('after'); },
+                callback: function () { calls.push('callback ' + this.conf.collapsed); },
+                elements: [{ selector: '#c-box', duration: 0, fullStyle: { width: '100px', backgroundRepeat: 'no-repeat' }, collapsedStyle: { width: 10 } }] });
+            var link = d.getElementById('c-link'), box = d.getElementById('c-box');
+            t.equal(link.getAttribute('role'), 'button', 'a span becomes a button');
+            t.equal(link.getAttribute('tabindex'), '0');
+            t.equal(link.getAttribute('aria-expanded'), 'true');
+            t.equal(c.$link, undefined, 'no jQuery property');
+            t.deepEqual(c.links, [link], 'the links as elements');
+            t.equal(X.collapse.get(link), c, 'Exp.collapse.get()');
+            link.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+            t.equal(box.style.width, '10px', 'Enter collapsed it; a number in px, as jQuery sets it');
+            t.equal(link.getAttribute('aria-expanded'), 'false');
+            t.equal(link.innerHTML, 'Show', 'the content');
+            t.deepEqual(calls, ['before', 'after', 'callback 1'], 'before, after (at once) and the callback');
+            t.ok(seen && seen.link === link && seen.collapsed === 1, 'exp:collapse');
+            link.click();
+            t.equal(box.style.width, '100px', 'a click expanded it');
+            t.equal(box.style.backgroundRepeat, 'no-repeat', 'other values are set at once');
+            link.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true }));
+            t.equal(box.style.width, '100px', 'another key does nothing');
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
+
+    test('collapse: without jQuery, sizes are animated over the duration, as with jQuery', function (t) {
+        var w, c, after = 0, box;
+        return window.ExpTest.bare({ modules: ['collapse'] }).then(function (win) {
+            w = win;
+            w.document.getElementById('sandbox').innerHTML = '<a href="#" id="c-link">x</a><div id="c-box" style="width: 200px"></div>';
+            box = w.document.getElementById('c-box');
+            c = w.Exp.collapse({ link: '#c-link', collapsed: 0, aftercollapse: function () { after++; },
+                elements: [{ selector: '#c-box', duration: 0.2, fullStyle: { width: '200px' }, collapsedStyle: { width: '20px' } }] });
+            t.ok(!w.document.getElementById('c-link').hasAttribute('role'), 'a link with href stays a link');
+            c.collapse();
+            if (w.Exp.reducedMotion) { t.equal(box.style.width, '20px', 'no motion: at once'); return null; }
+            t.ok(parseFloat(box.style.width) > 20, 'not there yet');
+            t.equal(box.style.overflow, 'hidden', 'overflow: hidden while the width changes');
+            return wait(400).then(function () {
+                t.equal(box.style.width, '20px', 'there after the duration');
+                t.equal(box.style.overflow, '', 'and overflow as it was');
+                t.equal(after, 1, 'aftercollapse once');
+            });
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
 }(window, document));

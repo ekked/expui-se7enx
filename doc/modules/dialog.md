@@ -209,7 +209,11 @@ d.load(url, { method, data }); // HTML from the server into the body; a Promise
 d.busy(true);                  // dimmed body, a spinner, aria-busy="true", "Loading..." for screen readers
 d.error('Not saved.');         // a message above the body, role="alert"; '' hides it
 d.destroy();                   // closes it and removes it from the page
-d.isOpen; d.value; d.element; d.$body;
+d.isOpen; d.value;
+d.element; d.header; d.heading; d.closeButton; d.body; d.errorElement; d.footer;   // the parts
+d.$body;                       // with jQuery: the parts in jQuery as well ($el, $header, $title, $close, $body, $error, $footer)
+Exp.dialog.get(d.element) === d;
+Exp.$(d.element).data('expDialog') === d;   // with jQuery
 Exp.$(d.element).data('expDialog') === d;
 ```
 
@@ -337,10 +341,29 @@ After:
 Exp.dialog.confirm('Remove?', { okLabel: 'Yes', cancelLabel: 'No' }).then(function (ok) { if (ok) { remove(); } });
 ```
 
+Without jQuery
+--------------
+
+Every call above needs no jQuery: on a page that loads none (`exp::core::shared` without
+`ezjsc::jquery` in front) the dialogs, their markup, focus, keyboard, events and Promises are the
+same.
+
+| | Without jQuery | With jQuery on the page (as before) |
+|---|---|---|
+| the parts | `element`, `header`, `heading`, `closeButton`, `body`, `errorElement`, `footer` | also `$el`, `$header`, `$title`, `$close`, `$body`, `$error`, `$footer` |
+| the dialog of an element | `Exp.dialog.get(element)` | also `$(element).data('expDialog')` |
+| a button's `action(dialog, event)` | the browser's event | jQuery's event |
+| `url`, `load()` | `fetch` (`Exp.util.request()`): the same method, fields and `Accept: text/html,*/*` | `$.ajax()` |
+| `scripts: true` | the content's scripts run as new `<script>` elements (one with `src` loads as the browser loads it) | jQuery's `.html()` |
+| the events on the `<dialog>` | `CustomEvent`s, the data in `event.detail` | also through `.trigger()`; each listener hears an event once |
+
+`dialog.body` is the body element on either page; before, it was the same jQuery object as
+`$body` (which code written for jQuery keeps using).
+
 Tests
 -----
 
-`design/standard/javascript/exp/test/dialog.test.js`, 15 tests on `/expui/test`:
+`design/standard/javascript/exp/test/dialog.test.js`, 18 tests on `/expui/test`:
 
 - a native modal, named by its title, the focus inside and back on the opener;
 - Escape and the close button (translated label) answer `null`; `dismissible: false`;
@@ -354,7 +377,10 @@ Tests
 - scripts in HTML content not run unless `scripts: true`;
 - stacked dialogs, `closeAll()`;
 - `data-exp-dialog` asking before submitting with the same button;
-- no dialog left open at the end.
+- no dialog left open at the end;
+- without jQuery (`ExpTest.bare()`): `confirm()` with the parts as elements, the `CustomEvent`s,
+  Escape and the focus back; a button's action with the browser's event, `load()` and `form()`
+  through `fetch`.
 
 The dialogs are also tested by use in the admin, admin2 and admin3 designs, on
 Exponential Velocity and on PHP-FPM, as the note at the top says.

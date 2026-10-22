@@ -12,6 +12,7 @@
         return host;
     }
     function wait(ms) { return new Promise(function (r) { window.setTimeout(r, ms); }); }
+    function echoUrl() { return Exp.io.url('expui/test/echo'); }
     function top() { var d = document.querySelectorAll('dialog.exp-dialog[open]'); return d[d.length - 1] || null; }
     function key(el, name, shift) {
         var e = new KeyboardEvent('keydown', { key: name, shiftKey: !!shift, bubbles: true, cancelable: true });
@@ -260,5 +261,69 @@
         Exp.dialog.closeAll();
         $('dialog.exp-dialog').remove();
         t.equal(open, 0, 'none was open');
+    });
+
+    // ---- without jQuery (exp::core::shared on a page that loads none) ------------------------------------------
+
+    test('dialog: without jQuery: confirm(), the parts as elements, CustomEvents, Escape, the focus back', function (t) {
+        var w, X, d, opener, p, native = [];
+        return window.ExpTest.bare({ modules: ['dialog'] }).then(function (win) {
+            w = win; X = w.Exp; d = w.document;
+            t.equal(w.jQuery, undefined, 'no jQuery in the frame');
+            d.getElementById('sandbox').innerHTML = '<button id="opener">open</button>';
+            opener = d.getElementById('opener');
+            opener.focus();
+            d.addEventListener('exp:dialog:open', function (e) { native.push('open:' + (e.detail.dialog instanceof X.dialog.Dialog) + ':' + (e.target === e.detail.dialog.element)); });
+            d.addEventListener('exp:dialog:close', function (e) { native.push('close:' + e.detail.value); });
+            p = X.dialog.confirm('Remove it?', { danger: true, okLabel: 'Remove' });
+            var dlg = p.dialog;
+            t.ok(dlg.element.tagName === 'DIALOG' && dlg.element.open, 'a native modal');
+            t.ok(dlg.body.nodeType === 1 && dlg.body.classList.contains('exp-dialog-body'), 'dialog.body: the element');
+            t.ok(dlg.header && dlg.heading && dlg.closeButton && dlg.footer && dlg.errorElement, 'the other parts');
+            t.equal(dlg.$body, undefined, 'no jQuery parts');
+            t.equal(X.dialog.get(dlg.element), dlg, 'Exp.dialog.get()');
+            t.equal(d.activeElement && d.activeElement.getAttribute('name'), 'cancel', 'danger: the focus on Cancel');
+            t.equal(dlg.element.getAttribute('role'), 'alertdialog');
+            dlg.element.dispatchEvent(new w.Event('cancel', { cancelable: true }));
+            return p;
+        }).then(function (ok) {
+            t.equal(ok, false, 'Escape dismissed it');
+            t.equal(d.activeElement, opener, 'the focus back');
+            t.deepEqual(native, ['open:true:true', 'close:null'], 'the events on the element, event.detail is the data');
+            t.equal(d.querySelector('dialog'), null, 'removed');
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
+
+    test('dialog: without jQuery, a button\'s action gets the browser\'s event; url and form() go through fetch', function (t) {
+        var w, X, got = [];
+        return window.ExpTest.bare({ modules: ['dialog'] }).then(function (win) {
+            w = win; X = w.Exp;
+            var p = X.dialog.open({ title: 'T', content: '<p>x</p>', buttons: [
+                { label: 'Keep', value: 'k', action: function (dlg, e) { got.push(dlg === p.dialog && e instanceof w.Event); return false; } },
+                { label: 'Done', value: 'done', primary: true }] });
+            var buttons = p.dialog.footer.querySelectorAll('button');
+            buttons[0].click();
+            t.deepEqual(got, [true], 'action(dialog, event)');
+            t.ok(p.dialog.isOpen, 'false kept it open');
+            buttons[1].click();
+            return p;
+        }).then(function (v) {
+            t.equal(v, 'done', 'closed with the value');
+            var p = X.dialog.open({ title: 'Load' });
+            // a POST carries the form token itself (load() adds none, with or without jQuery)
+            return p.dialog.load(echoUrl(), { method: 'POST', data: { a: 'x y', ezxform_token: Exp.token() } }).then(function (html) {
+                t.ok(/"a":"x y"/.test(html), 'load(): the fields posted, the answer in the body: ' + html.slice(0, 80));
+                t.equal(p.dialog.body.textContent, html);
+                p.dialog.close('x');
+            });
+        }).then(function () {
+            var p = X.dialog.form(null, { content: '<form method="post" action="' + echoUrl() + '"><input name="a" value="1"><button type="submit" name="go" value="yes">Go</button></form>' });
+            var f = p.dialog.body.querySelector('form');
+            if (typeof f.requestSubmit === 'function') { f.requestSubmit(f.querySelector('button')); } else { f.querySelector('button').click(); }
+            return p;
+        }).then(function (answer) {
+            t.equal(answer && answer.fields && answer.fields.a, '1', 'form(): the form posted');
+            t.equal(answer.fields.go, 'yes', 'with the button it was sent with');
+        }).finally(function () { window.ExpTest.unbare(w); });
     });
 }(window, document));

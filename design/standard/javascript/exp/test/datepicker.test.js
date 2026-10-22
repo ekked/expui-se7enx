@@ -16,6 +16,7 @@
             + '<div id="T_datetime_cal_container_9" style="display: none; position: absolute;"></div>';
         return host;
     }
+    function wait(ms) { return new Promise(function (r) { window.setTimeout(r, ms); }); }
     function val(part) { return document.getElementsByName('T_datetime_' + part + '_9')[0].value; }
     function picker() { return document.querySelector('#T_datetime_cal_container_9 .exp-datepicker'); }
     function day(n) {
@@ -163,5 +164,60 @@
         key(icon, 'Enter');
         t.ok(Exp.datepicker.isOpen(), 'Enter on the icon opens it');
         Exp.datepicker.close();
+    });
+
+    // ---- without jQuery (exp::core::shared on a page that loads none) ------------------------------------------
+
+    test('datepicker: without jQuery: create() adds the button; the keyboard chooses, the fields get a change event', function (t) {
+        var w;
+        return window.ExpTest.bare({ modules: ['datepicker'] }).then(function (win) {
+            w = win;
+            var X = w.Exp, d = w.document, host = d.getElementById('sandbox'), changed = [], events = [];
+            t.equal(w.jQuery, undefined, 'no jQuery in the frame');
+            host.innerHTML = '<fieldset id="dp"><input class="y" name="y" value="2025"><input class="m" name="m" value="1"><input class="d" name="d" value="31">'
+                + '<input class="h" name="h" value=""><input class="i" name="i" value=""></fieldset>';
+            host.addEventListener('change', function (e) { changed.push(e.target.name + '=' + e.target.value); });
+            ['open', 'select', 'close'].forEach(function (n) { X.on('exp:datepicker:' + n, function (e, data) { events.push(n + ':' + (data.fields.year === host.querySelector('.y'))); }); });
+            var set = X.datepicker.create(d.getElementById('dp'), { fields: { year: '.y', month: '.m', day: '.d', hour: '.h', minute: '.i' } });
+            t.ok(set && set.button && set.button.classList.contains('exp-datepicker-button'), 'a button after the day field');
+            t.equal(set.button.previousElementSibling, host.querySelector('.d'));
+            t.equal(set.fields.year, host.querySelector('.y'), 'the fields as elements');
+            t.equal(X.datepicker.get('#dp'), set, 'Exp.datepicker.get()');
+            set.button.click();
+            t.ok(X.datepicker.isOpen(), 'open');
+            t.equal(d.activeElement.getAttribute('data-date'), '2025-01-31', 'the date of the fields has the focus');
+            d.activeElement.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+            t.equal(d.activeElement.getAttribute('data-date'), '2025-02-01', 'right: into the next month');
+            d.activeElement.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+            t.equal(X.datepicker.isOpen(), false, 'Enter chose and closed');
+            t.deepEqual(changed, ['y=2025', 'm=2', 'd=1', 'h=12', 'i=00'], 'each field got its value and a change event');
+            t.equal(d.activeElement, host.querySelector('.y'), 'the year field has the focus');
+            t.deepEqual(events, ['open:true', 'close:true', 'select:true'], 'the events hand over the elements');
+            set.button.click();
+            d.activeElement.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+            t.equal(X.datepicker.isOpen(), false, 'Escape closes');
+            t.equal(d.activeElement, set.button, 'and gives the focus back');
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
+
+    test('datepicker: without jQuery, showDatePicker() opens in the template\'s container; a click outside closes it', function (t) {
+        var w;
+        return window.ExpTest.bare({ modules: ['datepicker'] }).then(function (win) {
+            w = win;
+            var d = w.document;
+            d.getElementById('sandbox').innerHTML = '<input name="T_date_year_4" value=""><input name="T_date_month_4" value=""><input name="T_date_day_4" value="">'
+                + '<button type="button" id="T_date_cal_4">c</button><div id="T_date_cal_container_4" style="display: none"></div>';
+            t.ok(w.showDatePicker.exp, 'showDatePicker is Exponential UI\'s');
+            var p = w.showDatePicker('T', '4', 'date');
+            var box = d.getElementById('T_date_cal_container_4');
+            t.ok(p && box.querySelector('.exp-datepicker') === p.element, 'in the container');
+            t.equal(box.style.display, 'block', 'the container is shown');
+            t.equal(p.element.querySelectorAll('tbody button').length, 42, 'six weeks of days');
+            return wait(20).then(function () {
+                d.body.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true }));
+                t.equal(w.Exp.datepicker.isOpen(), false, 'closed by a click outside');
+                t.equal(box.style.display, 'none', 'the container hidden again');
+            });
+        }).finally(function () { window.ExpTest.unbare(w); });
     });
 }(window, document));

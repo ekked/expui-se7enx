@@ -172,4 +172,54 @@
             t.ok(!document.getElementById('content-preview').classList.contains('previewed'), 'closed');
         });
     });
+
+    // ---- without jQuery (exp::core::shared on a page that loads none) ------------------------------------------
+
+    test('autosave: without jQuery: the same saves through fetch, the preview\'s parts as elements', function (t) {
+        var w, X, as, seen = [], forced = 0;
+        var waitFor = function (fn) { return until(fn); };
+        return window.ExpTest.bare({ modules: ['collapse', 'autosave'] }).then(function (win) {
+            w = win; X = w.Exp;
+            t.equal(w.jQuery, undefined, 'no jQuery in the frame');
+            var box = w.document.getElementById('sandbox');
+            box.innerHTML = '<div id="pv-bar"></div><form id="as-form"><input name="title" value="One"><input name="skip" class="no-autosave" value="a"></form>';
+            as = new X.autosave.AutoSubmit({ form: '#as-form', action: Exp.io.url('expui/test/echo'), interval: 3600, ignoreClass: 'no-autosave' });
+            ['init', 'beforesave', 'success', 'error', 'abort', 'nochange'].forEach(function (n) { as.on(n, function (e) { seen.push(n); as.last = e; }); });
+            return waitFor(function () { return seen.indexOf('init') !== -1; });
+        }).then(function () {
+            as.start();
+            return waitFor(function () { return as.started; });
+        }).then(function () {
+            as.submit();
+            t.deepEqual(seen, ['init', 'nochange'], 'no change, no save');
+            w.document.querySelector('[name=title]').value = 'Two';
+            w.document.querySelector('[name=title]').dispatchEvent(new w.FocusEvent('focusout', { bubbles: true }));
+            return waitFor(function () { return seen.indexOf('success') !== -1; });
+        }).then(function () {
+            t.deepEqual(seen.slice(0, 4), ['init', 'nochange', 'beforesave', 'success'], 'leaving a changed field saves');
+            t.equal(as.last.json.fields.title, 'Two', 'the server got the new value');
+            t.equal(as.last.json.token, true, 'with the form token');
+            as.stop();
+            X.on('autosubmit:forcesave', function () { forced++; });
+            var pv = new X.autosave.Preview({ buttonPlace: '#pv-bar', texts: { loading: 'L', error: 'E', preview: 'P' }, topPosition: '10px' });
+            pv.init();
+            t.ok(pv.linkElement && pv.linkElement.id === 'preview-link' && pv.placeElement.id === 'content-preview' && pv.previewElement.id === 'preview-iframe', 'the parts as elements');
+            t.equal(pv.place, undefined, 'no jQuery parts');
+            t.equal(pv.linkElement.style.height, '10px', 'the link as high as topPosition');
+            t.equal(pv.linkElement.getAttribute('role'), 'button');
+            pv.linkElement.click();
+            return wait(X.reducedMotion ? 50 : 900).then(function () { return pv; });
+        }).then(function (pv) {
+            t.ok(pv.placeElement.classList.contains('previewed'), 'open');
+            t.equal(forced, 1, 'an unsaved preview forces a save');
+            pv.setContent('<div><select><option>site</option></select><a class="close" href="#">x</a></div><iframe src="about:blank"></iframe>');
+            t.ok(pv.placeElement.querySelector('iframe') && !pv.placeElement.classList.contains('loading'), 'content set');
+            pv.error('No');
+            t.equal(pv.placeElement.querySelector('.error').textContent, 'E: No');
+            pv.placeElement.querySelector('a.close').click();
+            return wait(X.reducedMotion ? 50 : 1000).then(function () { return pv; });
+        }).then(function (pv) {
+            t.ok(!pv.placeElement.classList.contains('previewed'), 'closed');
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
 }(window, document));

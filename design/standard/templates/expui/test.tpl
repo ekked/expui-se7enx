@@ -14,7 +14,13 @@
          data-core="{'javascript/exp/core.js'|ezdesign( 'no' )|wash}"
          data-io="{'javascript/exp/io.js'|ezdesign( 'no' )|wash}"
          data-datatable="{'javascript/exp/datatable.js'|ezdesign( 'no' )|wash}"
-         data-dialog="{'javascript/exp/dialog.js'|ezdesign( 'no' )|wash}"></div>
+         data-compat="{'javascript/exp/compat.js'|ezdesign( 'no' )|wash}"
+         data-collapse="{'javascript/exp/collapse.js'|ezdesign( 'no' )|wash}"
+         data-sticky="{'javascript/exp/sticky.js'|ezdesign( 'no' )|wash}"
+         data-dialog="{'javascript/exp/dialog.js'|ezdesign( 'no' )|wash}"
+         data-upload="{'javascript/exp/upload.js'|ezdesign( 'no' )|wash}"
+         data-datepicker="{'javascript/exp/datepicker.js'|ezdesign( 'no' )|wash}"
+         data-autosave="{'javascript/exp/autosave.js'|ezdesign( 'no' )|wash}"></div>
     <input id="exp-test-input" type="text" aria-label="Test field" />
     <div id="exp-test-sandbox"></div>
 </div>

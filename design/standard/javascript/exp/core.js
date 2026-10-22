@@ -174,12 +174,253 @@
         return promise;
     }
 
+    // ---- styles and animations without jQuery -----------------------------------------------------------------
+    // What the modules use of jQuery's .css() and .animate() where the page has no jQuery, by jQuery's rules: a
+    // number is in px for the properties jQuery adds px to, a start value in other units than the end's is converted
+    // first, width and height never go below 0, an animated width or height has overflow: hidden meanwhile (and an
+    // inline element display: inline-block), the steps follow jQuery's "swing" on one timer for all animations
+    // (animation frames while the page is visible, else every 13 ms), and an animation started while none runs
+    // makes its first step at once (so one of 0 ms ends at once). 'show' and 'hide' fade an element in and out.
+
+    var AUTO_PX = /^(?:Border(?:Top|Right|Bottom|Left)?(?:Width|)|(?:Margin|Padding)?(?:Top|Right|Bottom|Left)?|(?:Min|Max)?(?:Width|Height))$/;
+    var CSS_NUM = /^(?:([+-])=|)([+-]?(?:\d*\.|)\d+(?:[eE][+-]?\d+|))([a-z%]*)$/i;
+    var NUM_NON_PX = /^([+-]?(?:\d*\.|)\d+(?:[eE][+-]?\d+|))(?!px)[a-z%]+$/i;
+
+    function camel(name) { return String(name).replace(/-([a-z])/g, function (all, c) { return c.toUpperCase(); }); }
+    function isAutoPx(prop) { return /^[a-z]/.test(prop) && AUTO_PX.test(prop.charAt(0).toUpperCase() + prop.slice(1)); }
+    function isBox(prop) { return prop === 'width' || prop === 'height'; }
+
+    /** jQuery.css(el, prop): the computed value; width and height as jQuery measures them */
+    function cssGet(el, prop) {
+        var cs = window.getComputedStyle(el);
+        if (isBox(prop)) {
+            if (cs.display === 'none') {
+                var saved = {}, show = { position: 'absolute', visibility: 'hidden', display: 'block' };
+                Object.keys(show).forEach(function (k) { saved[k] = el.style[k]; el.style[k] = show[k]; });
+                try { return cssGet(el, prop); } finally { Object.keys(show).forEach(function (k) { el.style[k] = saved[k]; }); }
+            }
+            var val = cs[prop], offset = 'offset' + prop.charAt(0).toUpperCase() + prop.slice(1), adjust = 0;
+            if (NUM_NON_PX.test(val)) { return val; }
+            if (val === 'auto' && el.getClientRects().length && offset in el) {
+                val = el[offset];
+                if (cs.boxSizing !== 'border-box') {
+                    (prop === 'width' ? ['Left', 'Right'] : ['Top', 'Bottom']).forEach(function (side) {
+                        adjust -= (parseFloat(cs['padding' + side]) || 0) + (parseFloat(cs['border' + side + 'Width']) || 0);
+                    });
+                }
+            }
+            return ((parseFloat(val) || 0) + adjust) + 'px';
+        }
+        var v = cs.getPropertyValue(prop) || cs[prop];
+        if (v === '' && !el.isConnected) { v = el.style[prop]; }
+        return v;
+    }
+    /** jQuery.css(el, prop, ''): a number where it is one */
+    function cssNumber(el, prop) {
+        var v = cssGet(el, prop), n = parseFloat(v);
+        return isFinite(n) ? n || 0 : v;
+    }
+
+    /** jQuery.style(el, prop, value): numbers get px where jQuery adds it; null and NaN are skipped. */
+    function cssSet(el, prop, value) {
+        prop = camel(prop);
+        if (value === null || value === undefined || value !== value) { return; }
+        var m;
+        if (typeof value === 'string' && (m = CSS_NUM.exec(value)) && m[1]) {
+            value = cssNumber(el, prop) + (m[1] + 1) * m[2] + (m[3] || (isAutoPx(prop) ? 'px' : ''));
+        } else if (typeof value === 'number') {
+            value += isAutoPx(prop) ? 'px' : '';
+        }
+        if (isBox(prop) && (m = CSS_NUM.exec(value))) { value = Math.max(0, m[2]) + (m[3] || 'px'); }
+        el.style[prop] = value;
+    }
+
+    /** Exp.util.css(el, 'width', '20px') or Exp.util.css(el, { width: 20 }): sets styles as jQuery's .css() does. */
+    function css(el, prop, value) {
+        if (!el || !el.style) { return el; }
+        if (typeof prop === 'string') { cssSet(el, prop, value); return el; }
+        Object.keys(prop || {}).forEach(function (k) { cssSet(el, k, prop[k]); });
+        return el;
+    }
+
+    // fxPending: a frame of the loop is queued; a new animation then joins it instead of starting a second loop
+    var fxTimers = [], fxRunning = false, fxPending = false, fxNow;
+    function fxTime() {
+        if (fxNow === undefined) { fxNow = Date.now(); window.setTimeout(function () { fxNow = undefined; }); }
+        return fxNow;
+    }
+    function fxTick() {
+        fxNow = Date.now();
+        for (var i = 0; i < fxTimers.length; i++) {
+            var timer = fxTimers[i];
+            if (!timer() && fxTimers[i] === timer) { fxTimers.splice(i--, 1); }
+        }
+        if (!fxTimers.length) { fxRunning = false; }
+        fxNow = undefined;
+    }
+    function fxSchedule() {
+        fxPending = false;
+        if (!fxRunning) { return; }
+        fxPending = true;
+        if (document.hidden === false && window.requestAnimationFrame) { window.requestAnimationFrame(fxSchedule); }
+        else { window.setTimeout(fxSchedule, 13); }
+        fxTick();
+    }
+
+    var shownDisplay = new WeakMap();
+    function defaultDisplay(el) {
+        var temp = el.ownerDocument.body.appendChild(el.ownerDocument.createElement(el.nodeName));
+        var display = window.getComputedStyle(temp).display;
+        temp.parentNode.removeChild(temp);
+        return display === 'none' || !display ? 'block' : display;
+    }
+    function hiddenInTree(el) {
+        return el.style.display === 'none' || (el.style.display === '' && el.isConnected && window.getComputedStyle(el).display === 'none');
+    }
+    function showHide(el, show) {
+        var display = el.style.display, value = null;
+        if (show) {
+            if (display === 'none') {
+                value = shownDisplay.get(el) || null;
+                if (!value) { el.style.display = ''; }
+            }
+            if (el.style.display === '' && hiddenInTree(el)) { value = defaultDisplay(el); }
+        } else if (display !== 'none') {
+            value = 'none';
+            shownDisplay.set(el, display);
+        }
+        if (value !== null) { el.style.display = value; }
+    }
+
+    /** One property's tween: its start in the end's unit (converted as jQuery's adjustCSS() does), its end. */
+    function tween(el, prop, end) {
+        var cur = function () { var v = cssNumber(el, prop); return !v || v === 'auto' ? 0 : v; };
+        var parts = CSS_NUM.exec(end), initial = cur(), unit = (parts && parts[3]) || (isAutoPx(prop) ? 'px' : '');
+        var t = { prop: prop, start: initial, end: end, unit: unit };
+        var inUnit = (!isAutoPx(prop) || (unit !== 'px' && +initial)) && CSS_NUM.exec(cssGet(el, prop));
+        if (inUnit && inUnit[3] !== unit) {
+            var scale, iterations = 20;
+            initial = initial / 2;
+            unit = unit || inUnit[3];
+            inUnit = +initial || 1;
+            while (iterations--) {
+                cssSet(el, prop, inUnit + unit);
+                if ((1 - scale) * (1 - (scale = cur() / initial || 0.5)) <= 0) { iterations = 0; }
+                inUnit = inUnit / scale;
+            }
+            inUnit = inUnit * 2;
+            cssSet(el, prop, inUnit + unit);
+            parts = parts || [];
+        }
+        if (parts) {
+            inUnit = +inUnit || +initial || 0;
+            t.unit = unit;
+            t.start = inUnit;
+            t.end = parts[1] ? inUnit + (parts[1] + 1) * parts[2] : +parts[2];
+        }
+        return t;
+    }
+
+    var animations = new WeakMap();
+
+    /**
+     * Exp.util.animate(el, { width: '20px', opacity: 0 }, ms, complete): as jQuery's .animate() (complete runs with
+     * this = el); a value 'show' or 'hide' fades the element in or out as .fadeIn() / .fadeOut() do.
+     */
+    function animate(el, props, duration, complete) {
+        duration = typeof duration === 'number' ? duration : 400;
+        var tweens = [], orig = {}, always = [], done = [], stopped = false;
+        var hidden = hiddenInTree(el), toggled = false;
+        var list = {};
+        Object.keys(props || {}).forEach(function (k) { list[camel(k)] = props[k]; });
+        Object.keys(list).forEach(function (prop) {
+            var v = list[prop];
+            if (v !== 'show' && v !== 'hide') { return; }
+            delete list[prop];
+            if (v === (hidden ? 'hide' : 'show')) { return; }
+            toggled = true;
+            orig[prop] = el.style[prop];
+        });
+        var any = Object.keys(list).length > 0;
+        if ((any || toggled) && (list.width !== undefined || list.height !== undefined)) {
+            var overflow = [el.style.overflow, el.style.overflowX, el.style.overflowY];
+            if (cssGet(el, 'display') === 'inline' && cssGet(el, 'float') === 'none') { el.style.display = 'inline-block'; }
+            el.style.overflow = 'hidden';
+            always.push(function () { el.style.overflow = overflow[0]; el.style.overflowX = overflow[1]; el.style.overflowY = overflow[2]; });
+        }
+        if (toggled) {
+            if (hidden) { showHide(el, true); }
+            done.push(function () {
+                if (!hidden) { showHide(el, false); }
+                Object.keys(orig).forEach(function (prop) { cssSet(el, prop, orig[prop]); });
+            });
+            Object.keys(orig).forEach(function (prop) {
+                var t = tween(el, prop, hidden ? undefined : 0);
+                if (hidden) { t.end = t.start; t.start = 0; }
+                tweens.push(t);
+            });
+        }
+        Object.keys(list).forEach(function (prop) { tweens.push(tween(el, prop, list[prop])); });
+        if (typeof complete === 'function') { done.push(function () { complete.call(el); }); }
+
+        var startTime = fxNow === undefined ? fxTime() : fxNow;
+        var run = function (percent) {
+            var eased = duration ? 0.5 - Math.cos(percent * Math.PI) / 2 : percent;
+            tweens.forEach(function (t) { cssSet(el, t.prop, ((t.end - t.start) * eased + t.start) + t.unit); });
+        };
+        var forget = function () {
+            var mine = animations.get(el) || [];
+            var i = mine.indexOf(anim);
+            if (i !== -1) { mine.splice(i, 1); }
+        };
+        var finish = function (ok) {
+            forget();
+            always.forEach(function (fn) { fn(); });
+            if (ok) { done.forEach(function (fn) { fn(); }); }
+        };
+        var anim = {
+            stop: function (toEnd) {
+                if (stopped) { return; }
+                stopped = true;
+                if (toEnd) { run(1); }
+                var i = fxTimers.indexOf(timer);
+                if (i !== -1) { fxTimers.splice(i, 1); }
+                finish(!!toEnd);
+            }
+        };
+        var timer = function () {
+            if (stopped) { return false; }
+            var now = fxNow === undefined ? fxTime() : fxNow;
+            var remaining = Math.max(0, startTime + duration - now), percent = 1 - (remaining / duration || 0);
+            run(percent);
+            if (percent < 1 && tweens.length) { return remaining; }
+            stopped = true;
+            finish(true);
+            return false;
+        };
+        var mine = animations.get(el) || [];
+        mine.push(anim);
+        animations.set(el, mine);
+        fxTimers.push(timer);
+        if (!fxRunning) { fxRunning = true; if (!fxPending) { fxSchedule(); } }
+        return el;
+    }
+
+    /** Exp.util.stop(el, jumpToEnd): as jQuery's .stop(true, jumpToEnd); jumping to the end runs complete. */
+    function stop(el, toEnd) {
+        (animations.get(el) || []).slice().reverse().forEach(function (anim) { anim.stop(toEnd); });
+        return el;
+    }
+
     /** Helpers that need no jQuery: extend() and param() follow jQuery's rules (they are jQuery's when it is there). */
     Exp.util = {
         extend: $ ? $.extend : plainExtend,
         param: $ ? $.param : plainParam,
         isPlainObject: isPlainObject,
-        request: request
+        request: request,
+        css: css,
+        animate: animate,
+        stop: stop
     };
     var extend = Exp.util.extend;
 

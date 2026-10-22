@@ -5,7 +5,7 @@
  * Loaded by exp::upload after exp::core (and exp::io, for its error type). The admin relation uploader's upload
  * step and ezmultiupload's uploader:
  *
- *   $(el).expUpload({
+ *   Exp.upload.create(el, {                       or $(el).expUpload({ ... })
  *       url: '/admin/ezmultiupload/upload/327',   where each file is POSTed (one request per file)
  *       name: 'file',                             the file's field name (default: the input's name, else 'file')
  *       multiple: false, accept: 'image/*,.pdf',  what can be chosen (accept also takes ['*.jpg', ...])
@@ -19,26 +19,35 @@
  *   });
  *
  * el is a container (a chooser, a drop zone and the file list are built in it) or an <input type="file"> (used as
- * the chooser, the list goes after it). The instance: $(el).data('expUpload') or $(el).expUpload('instance'):
- * add(files), start(), cancel(file|id) (no argument: all), files(), progress(), clear(), enable(), disable(),
- * destroy(). Events on el (bubbling) and page-wide (Exp.on), each with { upload, file, ... }:
+ * the chooser, the list goes after it). The instance: Exp.upload.get(el), $(el).data('expUpload') or
+ * $(el).expUpload('instance'): add(files), start(), cancel(file|id) (no argument: all), files(), progress(), clear(),
+ * enable(), disable(), destroy(). Events on el (bubbling) and page-wide (Exp.on), each with { upload, file, ... }:
  *   exp:upload:add, exp:upload:refuse { reason }, exp:upload:start, exp:upload:progress { loaded, total, percent },
  *   exp:upload:done { response }, exp:upload:fail { error }, exp:upload:cancel, exp:upload:complete { files, done,
  *   failed, canceled }.
  * Started from markup with data-exp-upload='{"url": "…", "multiple": true}'.
+ *
+ * Without jQuery it runs on plain JavaScript: the parts are elements (upload.el, .root, .zone, .input, .inputs,
+ * .listElement, .dropZones; a file's .row, .bar, .statusElement, .cancelButton) and the events on el are
+ * CustomEvents (event.detail). With jQuery 4 on the page it runs on it, exactly as before: its listeners (so
+ * .trigger() reaches them), the events through .trigger() as well, the parts in jQuery too ($el, $root, $input,
+ * $zone, $list, $drop; a file's $row, $bar, $status, $cancel) and $(el).data('expUpload'). The requests are the same
+ * XMLHttpRequests either way.
  */
 (function (window, document) {
     'use strict';
 
     var Exp = window.Exp;
-    if (!Exp || !Exp.$) {
-        // the core runs without jQuery (exp::core::shared on a page that loads none); this module needs it
-        if (Exp && Exp.ready && window.console) { window.console.error('Exp: exp::upload needs jQuery 4, and this page has none; request ezjsc::jquery before exp::core::shared'); }
+    if (!Exp || !Exp.config || !Exp.util) { return; }
+    if (Exp.upload && Exp.upload.install) {
+        // loaded twice: the first copy stays, with its uploads
+        Exp.upload.install(Exp.$);
         return;
     }
-    var $ = Exp.$;
+    var util = Exp.util;
 
     var nextId = 0;
+    var instances = new WeakMap();
 
     function t(text, params) { return Exp.i18n(text, params); }
 
@@ -87,19 +96,76 @@
         return xhr.status === 401 || /\/user\/login\b/.test(xhr.responseURL || '');
     }
 
-    function Upload($el, options) {
+    // ---- the DOM, with jQuery where the page has it ---------------------------------------------------------
+
+    /** Elements: a selector, an element, a list or jQuery; through jQuery when there is one (its selectors). */
+    function nodes(jq, target) {
+        if (jq) { return jq(target).toArray(); }
+        if (!target) { return []; }
+        if (typeof target === 'string') { return Array.prototype.slice.call(document.querySelectorAll(target)); }
+        return target.nodeType ? [target] : Array.prototype.slice.call(target);
+    }
+    function make(tag, attrs, text) {
+        var el = document.createElement(tag);
+        Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+        if (text !== undefined) { el.textContent = String(text); }
+        return el;
+    }
+    /** A list of elements in jQuery, without passing the list through jQuery() itself (which may read it as text) */
+    function wrap(jq, list) { return Array.isArray(list) ? jq.merge(jq(), list) : jq(list); }
+    function remove(jq, el) { if (jq) { jq(el).remove(); } else if (el && el.parentNode) { el.parentNode.removeChild(el); } }
+
+    /**
+     * Binds a listener to each element, through jQuery when there is one (namespaced, so .trigger() reaches it and
+     * .off('.expupload') removes it); returns the function that unbinds it.
+     */
+    function listen(jq, els, type, fn) {
+        if (jq) { var $t = wrap(jq, els); $t.on(type, fn); return function () { $t.off(type, fn); }; }
+        var name = type.split('.')[0];
+        els.forEach(function (el) { el.addEventListener(name, fn); });
+        return function () { els.forEach(function (el) { el.removeEventListener(name, fn); }); };
+    }
+
+    /**
+     * An event on the element: through jQuery when the upload has it (handlers get (event, data)), and as a native
+     * CustomEvent (event.detail is the data). While the CustomEvent is dispatched, the jQuery that triggered is told
+     * it is triggered already (jQuery.event.triggered), so its handlers run once; any other jQuery gets the native
+     * event like any listener.
+     */
+    function fire(el, name, data, jq) {
+        if (jq) { jq(el).trigger(name, [data]); }
+        var guarded = jq && jq.event ? [jq] : [];
+        var was = guarded.map(function (j) { var w = j.event.triggered; j.event.triggered = name; return w; });
+        try {
+            el.dispatchEvent(new window.CustomEvent(name, { bubbles: true, detail: data }));
+        } finally {
+            guarded.forEach(function (j, i) { j.event.triggered = was[i]; });
+        }
+    }
+
+    function hasFiles(e) {
+        var dt = (e.originalEvent || e).dataTransfer;
+        return !!dt && Array.prototype.indexOf.call(dt.types || [], 'Files') !== -1;
+    }
+
+    // ---- the upload -----------------------------------------------------------------------------------------
+
+    /** el: the element (or jQuery: its first one); options: see the header; jq: the jQuery it runs on (default Exp.$). */
+    function Upload(el, options, jq) {
         var self = this;
-        var o = this.options = $.extend({
+        if (el && el.jquery) { el = el[0]; }
+        this.jq = jq = jq === undefined ? (Exp.$ || null) : jq;
+        var o = this.options = util.extend({
             url: null, name: null, multiple: false, accept: null, drop: false, maxSize: 0, data: null, form: null,
             auto: true, parallel: 1, responseType: 'auto', headers: {}, token: true, list: true, input: null,
             texts: {}, onAdd: null, onRefuse: null, onStart: null, onProgress: null, onDone: null, onFail: null,
             onCancel: null, onComplete: null
         }, options || {});
-        this.$el = $el;
+        this.el = el;
         this.entries = [];
         this.enabled = true;
         this.accepts = acceptList(o.accept);
-        this.texts = $.extend({
+        this.texts = util.extend({
             select: o.multiple ? t('Select files') : t('Select a file'),
             drop: o.multiple ? t('or drop them here') : t('or drop it here'),
             cancel: t('Cancel'),
@@ -113,65 +179,81 @@
             wrongType: t('This type of file is not accepted.')
         }, o.texts || {});
 
-        var isInput = $el.is('input[type="file"]');
-        this.$input = o.input ? $(o.input) : (isInput ? $el : $());
+        var isInput = el.matches('input[type="file"]');
+        this.inputs = o.input ? nodes(jq, o.input) : (isInput ? [el] : []);
+        this.zone = null;
         if (isInput) {
-            this.$root = $('<div class="exp-upload exp-upload--input exp-scope"></div>').insertAfter($el);
+            this.root = make('div', { 'class': 'exp-upload exp-upload--input exp-scope' });
+            el.parentNode.insertBefore(this.root, el.nextSibling);
         } else {
-            this.$root = $el.addClass('exp-upload exp-scope');
-            if (!this.$input.length) {
-                this.$zone = $('<div class="exp-upload-zone"></div>').appendTo($el);
-                var $label = $('<label class="exp-upload-select"></label>').appendTo(this.$zone);
-                this.$input = $('<input type="file" class="exp-upload-input">').appendTo($label);
-                $('<span class="exp-upload-select-label"></span>').text(this.texts.select).appendTo($label);
-                if (o.drop) { $('<span class="exp-upload-hint"></span>').text(this.texts.drop).appendTo(this.$zone); }
+            this.root = el;
+            el.classList.add('exp-upload', 'exp-scope');
+            if (!this.inputs.length) {
+                this.zone = el.appendChild(make('div', { 'class': 'exp-upload-zone' }));
+                var label = this.zone.appendChild(make('label', { 'class': 'exp-upload-select' }));
+                this.inputs = [label.appendChild(make('input', { type: 'file', 'class': 'exp-upload-input' }))];
+                label.appendChild(make('span', { 'class': 'exp-upload-select-label' }, this.texts.select));
+                if (o.drop) { this.zone.appendChild(make('span', { 'class': 'exp-upload-hint' }, this.texts.drop)); }
             }
         }
-        if (!o.name) { o.name = this.$input.attr('name') || 'file'; }
-        if (o.multiple) { this.$input.prop('multiple', true); }
+        this.input = this.inputs[0] || null;
+        if (!o.name) { o.name = (this.input && this.input.getAttribute('name')) || 'file'; }
+        if (o.multiple) { this.inputs.forEach(function (i) { i.multiple = true; }); }
         var acc = acceptAttr(this.accepts);
-        if (acc) { this.$input.attr('accept', acc); }
-        this.$list = $('<ul class="exp-upload-list" aria-live="polite"></ul>').prop('hidden', true).appendTo(this.$root);
-        if (!o.list) { this.$list.addClass('exp-visually-hidden'); }
+        if (acc) { this.inputs.forEach(function (i) { i.setAttribute('accept', acc); }); }
+        this.listElement = make('ul', { 'class': 'exp-upload-list', 'aria-live': 'polite' });
+        this.listElement.hidden = true;
+        this.root.appendChild(this.listElement);
+        if (!o.list) { this.listElement.classList.add('exp-visually-hidden'); }
 
-        this.$input.on('change.expupload', function () {
+        this.unbind = [];
+        this.unbind.push(listen(jq, this.inputs, 'change.expupload', function () {
             if (!this.files || !this.files.length) { return; }
             self.add(this.files);
-        });
+        }));
 
-        var $drop = o.drop === true ? (isInput ? this.$root : $el) : (o.drop ? $(o.drop) : $());
-        this.$drop = $drop;
-        if ($drop.length) {
-            $drop.addClass('exp-upload-drop');
+        var drops = this.dropZones = o.drop === true ? [isInput ? this.root : el] : (o.drop ? nodes(jq, o.drop) : []);
+        if (drops.length) {
             var depth = 0;
-            $drop.on('dragenter.expupload', function (e) {
+            var over = function (on) { drops.forEach(function (d) { d.classList[on ? 'add' : 'remove']('is-over'); }); };
+            drops.forEach(function (d) { d.classList.add('exp-upload-drop'); });
+            this.unbind.push(listen(jq, drops, 'dragenter.expupload', function (e) {
                 if (!self.enabled || !hasFiles(e)) { return; }
-                e.preventDefault(); depth++; $drop.addClass('is-over');
-            }).on('dragover.expupload', function (e) {
+                e.preventDefault(); depth++; over(true);
+            }));
+            this.unbind.push(listen(jq, drops, 'dragover.expupload', function (e) {
                 if (!self.enabled || !hasFiles(e)) { return; }
                 e.preventDefault();
-                e.originalEvent.dataTransfer.dropEffect = 'copy';
-            }).on('dragleave.expupload', function () {
+                (e.originalEvent || e).dataTransfer.dropEffect = 'copy';
+            }));
+            this.unbind.push(listen(jq, drops, 'dragleave.expupload', function () {
                 depth = Math.max(0, depth - 1);
-                if (!depth) { $drop.removeClass('is-over'); }
-            }).on('drop.expupload', function (e) {
+                if (!depth) { over(false); }
+            }));
+            this.unbind.push(listen(jq, drops, 'drop.expupload', function (e) {
                 if (!hasFiles(e)) { return; }
-                e.preventDefault(); depth = 0; $drop.removeClass('is-over');
+                e.preventDefault(); depth = 0; over(false);
                 if (!self.enabled) { return; }
-                var files = e.originalEvent.dataTransfer.files;
+                var files = (e.originalEvent || e).dataTransfer.files;
                 self.add(o.multiple ? files : Array.prototype.slice.call(files, 0, 1));
-            });
+            }));
         }
-        $el.data('expUpload', this);
+        instances.set(el, this);
+        if (jq) { jq(el).data('expUpload', this); }
     }
 
-    function hasFiles(e) {
-        var dt = e.originalEvent && e.originalEvent.dataTransfer;
-        return !!dt && Array.prototype.indexOf.call(dt.types || [], 'Files') !== -1;
-    }
+    // the parts in jQuery, while the upload runs on it (undefined without jQuery), for code written for it
+    var PARTS = { $el: 'el', $root: 'root', $input: 'inputs', $zone: 'zone', $list: 'listElement', $drop: 'dropZones' };
+    Object.keys(PARTS).forEach(function (name) {
+        Object.defineProperty(Upload.prototype, name, {
+            configurable: true,
+            get: function () { var v = this[PARTS[name]]; return this.jq && v ? wrap(this.jq, v) : undefined; },
+            set: function (v) { Object.defineProperty(this, name, { value: v, writable: true, configurable: true, enumerable: true }); }
+        });
+    });
 
     Upload.prototype.emit = function (name, data, callback) {
-        data = $.extend({ upload: this }, data);
+        data = util.extend({ upload: this }, data);
         var o = this.options, cb = o[callback];
         if (typeof cb === 'function') {
             try {
@@ -183,7 +265,7 @@
                 if (window.console) { window.console.error('Exp.upload: ' + callback + ' failed', e); }
             }
         }
-        this.$el.trigger('exp:upload:' + name, [data]);
+        fire(this.el, 'exp:upload:' + name, data, this.jq);
         Exp.emit('exp:upload:' + name, data);
     };
 
@@ -222,26 +304,30 @@
 
     /** The file's row in the list: name, size, progress, status, cancel. */
     Upload.prototype.row = function (f) {
-        var self = this;
-        this.$list.prop('hidden', false);
-        if (!f.$row) {
-            f.$row = $('<li class="exp-upload-file"></li>').attr('id', f.id);
-            $('<span class="exp-upload-name"></span>').text(f.name).appendTo(f.$row);
-            $('<span class="exp-upload-size"></span>').text(size(f.size)).appendTo(f.$row);
-            f.$bar = $('<progress class="exp-upload-progress" max="100" value="0"></progress>').attr('aria-label', f.name).appendTo(f.$row);
-            f.$status = $('<span class="exp-upload-status"></span>').appendTo(f.$row);
-            f.$cancel = $('<button type="button" class="exp-upload-cancel"></button>').text(this.texts.cancel)
-                .attr('aria-label', this.texts.cancelFile.split('%name').join(f.name))
-                .on('click', function (e) { e.preventDefault(); self.cancel(f); }).appendTo(f.$row);
-            this.$list.append(f.$row);
+        var self = this, jq = this.jq;
+        this.listElement.hidden = false;
+        if (!f.row) {
+            f.row = make('li', { 'class': 'exp-upload-file', id: f.id });
+            f.row.appendChild(make('span', { 'class': 'exp-upload-name' }, f.name));
+            f.row.appendChild(make('span', { 'class': 'exp-upload-size' }, size(f.size)));
+            f.bar = f.row.appendChild(make('progress', { 'class': 'exp-upload-progress', max: '100', value: '0', 'aria-label': f.name }));
+            f.statusElement = f.row.appendChild(make('span', { 'class': 'exp-upload-status' }));
+            f.cancelButton = make('button', { type: 'button', 'class': 'exp-upload-cancel' }, this.texts.cancel);
+            f.cancelButton.setAttribute('aria-label', this.texts.cancelFile.split('%name').join(f.name));
+            listen(jq, [f.cancelButton], 'click', function (e) { e.preventDefault(); self.cancel(f); });
+            f.row.appendChild(f.cancelButton);
+            this.listElement.appendChild(f.row);
+            if (jq) { f.$row = jq(f.row); f.$bar = jq(f.bar); f.$status = jq(f.statusElement); f.$cancel = jq(f.cancelButton); }
         }
-        f.$row.attr('class', 'exp-upload-file is-' + f.status);
-        f.$bar.val(f.percent).text(f.percent + '%').prop('hidden', f.status === 'refused');
+        f.row.setAttribute('class', 'exp-upload-file is-' + f.status);
+        f.bar.value = f.percent;
+        f.bar.textContent = f.percent + '%';
+        f.bar.hidden = f.status === 'refused';
         var text = { queued: this.texts.waiting, uploading: this.texts.uploading + ' ' + f.percent + '%', done: this.texts.done,
                      failed: this.texts.failed + (f.error && f.error.message ? ': ' + f.error.message : ''), canceled: this.texts.canceled,
                      refused: f.reason }[f.status];
-        f.$status.text(text || '');
-        f.$cancel.prop('hidden', f.status !== 'queued' && f.status !== 'uploading');
+        f.statusElement.textContent = text || '';
+        f.cancelButton.hidden = f.status !== 'queued' && f.status !== 'uploading';
     };
 
     /** Removes a file that is not uploading from the list. */
@@ -249,15 +335,16 @@
         if (f.status === 'uploading') { return; }
         var i = this.entries.indexOf(f);
         if (i !== -1) { this.entries.splice(i, 1); }
-        if (f.$row) { f.$row.remove(); }
-        if (!this.entries.length) { this.$list.prop('hidden', true); }
+        if (f.row) { remove(this.jq, f.row); }
+        if (!this.entries.length) { this.listElement.hidden = true; }
     };
 
     /** The POST body of one file: the form's fields (the file put in its place), data, the form token. */
     Upload.prototype.body = function (f) {
         var o = this.options, fd;
+        var form = o.form ? nodes(this.jq, o.form)[0] : null;
         if (o.form) {
-            fd = new FormData($(o.form)[0]);
+            fd = new FormData(form);
             fd.set(o.name, f.file, f.name);
         } else {
             fd = new FormData();
@@ -397,39 +484,82 @@
         return this;
     };
 
-    Upload.prototype.enable = function () { this.enabled = true; this.$input.prop('disabled', false); this.$root.removeClass('is-disabled'); return this; };
-    Upload.prototype.disable = function () { this.enabled = false; this.$input.prop('disabled', true); this.$root.addClass('is-disabled'); return this; };
+    Upload.prototype.enable = function () {
+        this.enabled = true;
+        this.inputs.forEach(function (i) { i.disabled = false; });
+        this.root.classList.remove('is-disabled');
+        return this;
+    };
+    Upload.prototype.disable = function () {
+        this.enabled = false;
+        this.inputs.forEach(function (i) { i.disabled = true; });
+        this.root.classList.add('is-disabled');
+        return this;
+    };
 
     /** Cancels what is running and takes the list, the chooser it built and its handlers away. */
     Upload.prototype.destroy = function () {
+        var jq = this.jq;
         this.cancel();
-        this.$input.off('.expupload');
-        this.$drop.off('.expupload').removeClass('exp-upload-drop is-over');
-        this.$list.remove();
-        if (this.$zone) { this.$zone.remove(); }
-        if (this.$root[0] !== this.$el[0]) { this.$root.remove(); } else { this.$root.removeClass('exp-upload exp-scope is-disabled'); }
-        this.$el.removeData('expUpload');
-    };
-
-    Exp.upload = { Upload: Upload, size: size, accepted: function (file, accept) { return accepted(file, acceptList(accept)); } };
-
-    /** The instance on an element (jQuery's data() would also read a data-exp-upload attribute under the same name). */
-    function instanceOf($el) { var u = $el.data('expUpload'); return u instanceof Upload ? u : null; }
-
-    /** $(el).expUpload(options) sets it up; $(el).expUpload('start' | 'cancel' | 'clear' | 'destroy' | 'instance'). */
-    $.fn.expUpload = function (options) {
-        if (typeof options === 'string') {
-            var inst = instanceOf(this.first());
-            if (options === 'instance') { return inst || null; }
-            this.each(function () { var u = instanceOf($(this)); if (u && typeof u[options] === 'function') { u[options](); } });
-            return this;
+        if (jq) {
+            wrap(jq, this.inputs).off('.expupload');
+            wrap(jq, this.dropZones).off('.expupload');
+        } else {
+            this.unbind.forEach(function (off) { off(); });
         }
-        return this.each(function () {
-            var $el = $(this);
-            if (instanceOf($el)) { return; }
-            new Upload($el, options);
-        });
+        this.unbind = [];
+        this.dropZones.forEach(function (d) { d.classList.remove('exp-upload-drop', 'is-over'); });
+        remove(jq, this.listElement);
+        if (this.zone) { remove(jq, this.zone); }
+        if (this.root !== this.el) { remove(jq, this.root); } else { this.root.classList.remove('exp-upload', 'exp-scope', 'is-disabled'); }
+        instances.delete(this.el);
+        if (jq) { jq(this.el).removeData('expUpload'); }
     };
 
-    Exp.register('upload', function ($el, options) { $el.expUpload(options); });
+    /** The instance on an element (an element, a selector or jQuery), or null. */
+    function get(el) {
+        el = nodes(null, el)[0];
+        return (el && instances.get(el)) || null;
+    }
+
+    /** Exp.upload.create(el, options): sets one up on el (an element, a selector or jQuery: the first); an element that has one keeps it. */
+    function create(el, options) {
+        el = nodes(null, el)[0];
+        if (!el) { return null; }
+        return get(el) || new Upload(el, options);
+    }
+
+    /**
+     * Puts $.fn.expUpload on a jQuery: Exp.$ when the file loads; call it for a jQuery the page loads later.
+     * $(el).expUpload(options) sets it up; $(el).expUpload('start' | 'cancel' | 'clear' | 'destroy' | 'instance').
+     */
+    function install(jq) {
+        if (!jq || !jq.fn || (jq.fn.expUpload && jq.fn.expUpload.exp)) { return false; }
+        jq.fn.expUpload = function (options) {
+            if (typeof options === 'string') {
+                var inst = this[0] ? instances.get(this[0]) || null : null;
+                if (options === 'instance') { return inst; }
+                this.each(function () { var u = instances.get(this); if (u && typeof u[options] === 'function') { u[options](); } });
+                return this;
+            }
+            return this.each(function () {
+                if (instances.get(this)) { return; }
+                new Upload(this, options, jq);
+            });
+        };
+        jq.fn.expUpload.exp = true;
+        return true;
+    }
+
+    Exp.upload = {
+        Upload: Upload, size: size, accepted: function (file, accept) { return accepted(file, acceptList(accept)); },
+        create: create, get: get, install: install
+    };
+
+    install(Exp.$);
+
+    Exp.register('upload', function (target, options) {
+        if (target && target.jquery) { target.expUpload(options); return; }
+        create(target, options);
+    });
 }(window, document));
