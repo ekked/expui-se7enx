@@ -1,8 +1,8 @@
 Changelog
 =========
 
-Unreleased
-----------
+1.0.0.15 (2026-10-23)
+---------------------
 
 Added
 - Exponential UI runs without jQuery. `exp::core::shared` on a page that
