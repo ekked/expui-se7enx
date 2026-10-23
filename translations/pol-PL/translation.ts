@@ -5,11 +5,11 @@
     <name>extension/expui</name>
     <message>
         <source>Close</source>
-        <translation>Zamknij</translation>
+        <translation>Zamknąć</translation>
     </message>
     <message>
         <source>Cancel</source>
-        <translation>Anuluj</translation>
+        <translation>Anulować</translation>
     </message>
     <message>
         <source>OK</source>
@@ -41,7 +41,7 @@
     </message>
     <message>
         <source>Choose a date</source>
-        <translation>Wybierz datę</translation>
+        <translation>Wybrać datę</translation>
     </message>
     <message>
         <source>No records found.</source>
@@ -53,11 +53,11 @@
     </message>
     <message>
         <source>Click to sort ascending</source>
-        <translation>Kliknij, aby posortować rosnąco</translation>
+        <translation>Kliknąć, aby posortować rosnąco</translation>
     </message>
     <message>
         <source>Click to sort descending</source>
-        <translation>Kliknij, aby posortować malejąco</translation>
+        <translation>Kliknąć, aby posortować malejąco</translation>
     </message>
     <message>
         <source>Sorted by %column, ascending</source>
@@ -117,15 +117,15 @@
     </message>
     <message>
         <source>Please enter a valid number between 1 and %max</source>
-        <translation>Podaj poprawną liczbę od 1 do %max</translation>
+        <translation>Podać poprawną liczbę od 1 do %max</translation>
     </message>
     <message>
         <source>Select all</source>
-        <translation>Zaznacz wszystko</translation>
+        <translation>Zaznaczyć wszystko</translation>
     </message>
     <message>
         <source>Select %name</source>
-        <translation>Zaznacz %name</translation>
+        <translation>Zaznaczyć %name</translation>
     </message>
     <message>
         <source>Filter</source>
@@ -133,15 +133,15 @@
     </message>
     <message>
         <source>Press Enter to edit</source>
-        <translation>Naciśnij Enter, aby edytować</translation>
+        <translation>Nacisnąć Enter, aby edytować</translation>
     </message>
     <message>
         <source>Select files</source>
-        <translation>Wybierz pliki</translation>
+        <translation>Wybrać pliki</translation>
     </message>
     <message>
         <source>Select a file</source>
-        <translation>Wybierz plik</translation>
+        <translation>Wybrać plik</translation>
     </message>
     <message>
         <source>or drop them here</source>
@@ -153,7 +153,7 @@
     </message>
     <message>
         <source>Cancel the upload of %name</source>
-        <translation>Anuluj przesyłanie %name</translation>
+        <translation>Anulować przesyłanie %name</translation>
     </message>
     <message>
         <source>Waiting</source>
