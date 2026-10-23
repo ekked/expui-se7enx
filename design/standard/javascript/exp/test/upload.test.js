@@ -198,4 +198,39 @@
         t.ok(up && up.options.multiple, 'started with its options');
         t.ok($('#u-auto input[type="file"]').prop('multiple'));
     });
+
+    // ---- without jQuery (exp::core::shared on a page that loads none) ------------------------------------------
+
+    test('upload: without jQuery: Exp.upload.create(), one POST per file, the parts as elements, CustomEvents', function (t) {
+        var w, X, up, el, native = [], done = [];
+        return window.ExpTest.bare({ modules: ['upload'] }).then(function (win) {
+            w = win; X = w.Exp;
+            t.equal(w.jQuery, undefined, 'no jQuery in the frame');
+            el = w.document.getElementById('sandbox');
+            el.innerHTML = '';
+            ['add', 'start', 'done', 'complete'].forEach(function (n) { el.addEventListener('exp:upload:' + n, function (e) { native.push(n + ':' + (e.detail.upload === up) + ':' + (e.detail.file ? e.detail.file.name : e.detail.done)); }); });
+            up = X.upload.create(el, { url: echo(), name: 'Filedata', multiple: true, drop: true, accept: '.txt', data: { UploadButton: 'Upload' },
+                                       onDone: function (response, f) { done.push([f.name, response.files.Filedata && response.files.Filedata.name, response.fields.UploadButton, !!f.row, f.$row]); } });
+            t.equal(X.upload.get(el), up, 'Exp.upload.get()');
+            t.equal(X.upload.create(el, {}), up, 'create() again keeps it');
+            t.ok(up.input && up.input.type === 'file' && up.input.multiple, 'the chooser, as an element');
+            t.equal(up.input.getAttribute('accept'), '.txt');
+            t.ok(up.listElement.hidden && up.zone && up.dropZones[0] === el, 'the list, the zone, the drop zone');
+            t.equal(up.$el, undefined, 'no jQuery parts');
+            var w2 = w;
+            up.add([new w2.File(['aaa'], 'a.txt', { type: 'text/plain' }), new w2.File(['b'], 'b.pdf', { type: 'application/pdf' }), new w2.File(['cc'], 'c.txt', { type: 'text/plain' })]);
+            return up.running;
+        }).then(function (summary) {
+            t.equal(summary.done, 2, 'two sent, the PDF refused');
+            t.deepEqual(done, [['a.txt', 'a.txt', 'Upload', true, undefined], ['c.txt', 'c.txt', 'Upload', true, undefined]], 'onDone(response, file): the server got each file with the data');
+            t.deepEqual(native, ['add:true:a.txt', 'add:true:c.txt', 'start:true:a.txt', 'done:true:a.txt', 'start:true:c.txt', 'done:true:c.txt', 'complete:true:2'],
+                        'the events on the element, event.detail is the data');
+            var rows = el.querySelectorAll('.exp-upload-file');
+            t.equal(rows.length, 3, 'a row per file');
+            t.ok(rows[1].classList.contains('is-refused'), 'the refused one says so');
+            up.destroy();
+            t.equal(X.upload.get(el), null, 'destroy() forgets it');
+            t.equal(el.querySelectorAll('input, .exp-upload-list').length, 0, 'and takes the chooser and the list away');
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
 }(window, document));

@@ -26,9 +26,9 @@ Available
 | `exp::datepicker` | 1.0.0.1 | YUI 2 `Calendar`, `ezdatepicker.js` (the date and date/time fields of admin, admin2, admin3, ezwebin, ezdemo) | [modules/datepicker.md](modules/datepicker.md) |
 | `exp::autosave` | 1.0.0.1 | `ezautosubmit`, `ezcontentpreview` (ezautosave's autosave and draft preview) | [modules/autosave.md](modules/autosave.md) |
 
-`exp::core`, `exp::io` and `exp::datatable` also run without jQuery (`exp::core::shared` on a
-page that loads none: [API.md](API.md#without-jquery)); every other module needs jQuery 4 and
-says so in the console when the page has none.
+Every module but `exp::compat` also runs without jQuery (`exp::core::shared` on a page that
+loads none: [API.md](API.md#without-jquery)); `exp::compat` needs jQuery 4 and says so in the
+console when the page has none.
 
 Every available module but `exp::compat` is loaded on every admin page (admin,
 admin2, admin3) through `design.ini` `BackendJavaScriptList` (the core as

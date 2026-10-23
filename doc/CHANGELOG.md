@@ -30,13 +30,37 @@ Added
   `$.data(tr, 'expRow')`, listeners bound through jQuery so `.trigger()`
   reaches them. [modules/datatable.md](modules/datatable.md#without-jquery)
 - `expui/test`: `ExpTest.bare()`, a frame without jQuery, and 7 tests of the
-  plain JavaScript path (125 tests). [TESTING.md](TESTING.md)
+  plain JavaScript path. [TESTING.md](TESTING.md)
+- `exp::collapse`, `exp::sticky`, `exp::dialog`, `exp::upload`,
+  `exp::datepicker` and `exp::autosave` run without jQuery as well, with the
+  same markup, classes, ARIA, keyboard, focus, animations and requests. Where
+  jQuery 4 is on the page they run on it exactly as before: listeners bound
+  through it (`.trigger()` reaches them), its `.animate()`, `.html()` and
+  `$.ajax()`, the parts in jQuery, the plugins. New entry points that take
+  elements: `Exp.upload.create()`, `Exp.datepicker.create()` and, to find an
+  instance, `Exp.collapse.get()`, `Exp.sticky.get()`, `Exp.dialog.get()`,
+  `Exp.upload.get()`, `Exp.datepicker.get()`; `Exp.sticky.start()`,
+  `Exp.collapse()`, `Exp.dialog.*` and `Exp.autosave.*` take elements as
+  before. The parts are there as elements (`dialog.body`, `upload.listElement`,
+  a file's `row`, `preview.placeElement` …), in jQuery too while the page has
+  it (`$body`, `$list`, `$row`, `preview.place` …). The events on the dialog
+  and the upload element are also `CustomEvent`s (each listener hears one
+  once); without jQuery the date picker's fields get a native `change` event
+  and the events hand over elements. `Exp.<module>.install(jQuery)` puts the
+  plugins on a jQuery loaded later. [API.md](API.md#without-jquery)
+- `exp::core`: `Exp.util.css()`, `Exp.util.animate()` and `Exp.util.stop()`,
+  jQuery's `.css()`, `.animate()` (`'show'`/`'hide'` for the fades) and
+  `.stop()` by its rules and timing, for the modules without jQuery.
+- `expui/test`: 11 tests of the plain JavaScript path of these modules, and
+  `ExpTest.bare()` loads them (136 tests). [TESTING.md](TESTING.md)
 
 Changed
-- The modules that need jQuery (`exp::compat`, `exp::collapse`,
-  `exp::sticky`, `exp::dialog`, `exp::upload`, `exp::datepicker`,
-  `exp::autosave`) say so in the browser console when the page has none,
-  instead of setting nothing up silently.
+- `exp::compat`, the one module that needs jQuery, says so in the browser
+  console when the page has none, instead of setting nothing up silently.
+- `dialog.body` is the body element; it was the same jQuery object as
+  `dialog.$body`, which stays.
+- A module file loaded twice keeps its first copy (and its open dialogs,
+  uploads and toolbars) instead of setting up a second one.
 - When the boot finds a jQuery that is not a 4.x, the core now runs without
   jQuery instead of not at all (the console still says which jQuery it found).
 

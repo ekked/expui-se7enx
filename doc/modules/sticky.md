@@ -104,16 +104,40 @@ Nothing to convert in the admin. A design of your own that copied
 Exp.ready(function ($) { $('#controlbar-top').expSticky(); });
 ```
 
+Without jQuery
+--------------
+
+`Exp.sticky.start(toolbar, options)` needs no jQuery (`toolbar`: an element, a selector or
+jQuery; the first one), and neither does `Exp.sticky.admin()`, which `exp::sticky` runs when the
+page is ready. The class, the scroll positions, the order of the tests and the focus are the same;
+the link's fade goes through `Exp.util.animate()` (jQuery's steps and timing; at once with reduced
+motion).
+
+```js
+var s = Exp.sticky.start(document.getElementById('controlbar-top'), { form: '#editform' });
+Exp.sticky.get('#controlbar-top') === s;   // the instance of a toolbar
+s.toolbar; s.form; s.startElement; s.toTop; // the elements it works with
+```
+
+| | Without jQuery | With jQuery on the page (as before) |
+|---|---|---|
+| the instance | `Exp.sticky.get(toolbar)` | also `$(toolbar).data('expSticky')` |
+| listeners | `addEventListener('scroll')` on the window, `click` on the link | jQuery's (`scroll.expsticky`, `click.expsticky`) |
+| the fade | `Exp.util.animate()` | `.stop(true).animate()` |
+| `$.fn.expSticky` | not there | there (`Exp.sticky.install(jQuery)` for a jQuery loaded later) |
+
 Tests
 -----
 
-`design/standard/javascript/exp/test/sticky.test.js`, 4 tests on
+`design/standard/javascript/exp/test/sticky.test.js`, 6 tests on
 `/expui/test`:
 
 - a page without the form;
 - fixing and unfixing around the start, and the "go to the top" link;
 - scrolling to the start and focusing the first field;
-- `$.fn.expSticky`.
+- `$.fn.expSticky`;
+- without jQuery (`ExpTest.bare()`): fixing, unfixing and the link's fade; scrolling to the start
+  and focusing the first enabled field.
 
 The admin's edit toolbar is also tested by use in the admin, admin2 and admin3
 designs.

@@ -160,10 +160,35 @@ The configuration and the events are the same. ezautosave's two templates show
 the complete move: the Exponential UI branch is followed by the untouched YUI
 one.
 
+Without jQuery
+--------------
+
+`new Exp.autosave.AutoSubmit(conf)` and `new Exp.autosave.Preview(conf)` need no jQuery (the
+preview `exp::collapse`, which needs none either). The configuration, the events, the comparison
+and the markup are the same; the draft is posted through `fetch` (`Exp.util.request()`) exactly as
+`$.ajax()` posted it:
+
+- `POST` to `action`, the form's `FormData` with the extra fields after it and the form token
+  added when the form has none (the browser writes the `multipart/form-data` boundary);
+- `Accept: text/plain, */*; q=0.01` (what jQuery sent for `dataType: 'text'`),
+  `X-Requested-With: XMLHttpRequest`, cookies for the same origin;
+- a save replaced by a newer one is aborted without `abort`; one cut off by `stop()` fires `abort`;
+  an answer that is not JSON, or has `error_text`, fires `error`.
+
+| | Without jQuery | With jQuery on the page (as before) |
+|---|---|---|
+| the preview's parts | `linkElement`, `placeElement`, `previewElement` | also `link`, `place`, `preview` in jQuery |
+| the request | `Exp.util.request()` (a Promise with `abort()`) as `this.request` | `$.ajax()`'s jqXHR |
+| the animations | `Exp.util.animate()` (the fade of the contents, the iframe's height, the loader's fade in and out) | `.animate()`, `.fadeIn()`, `.fadeOut()` |
+| the preview's content | `innerHTML` | `.html()` |
+| `$.fn.expAutosave`, `$.fn.expPreview` | not there | there (`Exp.autosave.install(jQuery)` for a jQuery loaded later) |
+
+The handlers of `on()` get `{ type, json }` either way.
+
 Tests
 -----
 
-`design/standard/javascript/exp/test/autosave.test.js`, 8 tests on
+`design/standard/javascript/exp/test/autosave.test.js`, 9 tests on
 `/expui/test`:
 
 - the form state (ignored fields, boxes, buttons);
@@ -173,6 +198,8 @@ Tests
 - an answer that is not JSON;
 - `stop()` and abort;
 - leaving a field, `enabled`, and `beforeSerialize`;
-- the preview: opening, the forced save, content, the error, closing.
+- the preview: opening, the forced save, content, the error, closing;
+- without jQuery (`ExpTest.bare()`): no change and a change saved through `fetch` with the form
+  token, the preview's parts as elements, opening and closing it.
 
 ezautosave is also tested by use, as the note at the top says.

@@ -17,17 +17,24 @@
  * the focus goes back to where it was. aria-labelledby names the title (or the text, without a title).
  * Events, on the dialog element (bubbling) and page-wide (Exp.on): exp:dialog:open { dialog },
  * exp:dialog:close { dialog, value }. Started from markup with data-exp-dialog (see doc/modules/dialog.md).
+ *
+ * Without jQuery it runs on plain JavaScript: the parts are elements (dialog.element, .header, .heading,
+ * .closeButton, .body, .errorElement, .footer), the events on the element are CustomEvents (event.detail), a
+ * button's action gets the browser's event, url loads through fetch (Exp.util.request()). With jQuery 4 on the page
+ * it runs on it, exactly as before: its listeners, $.ajax(), .html() for scripts: true, the events through
+ * .trigger() as well, the parts in jQuery too ($el, $header, $title, $close, $body, $error, $footer) and
+ * $(dialog.element).data('expDialog'). Exp.dialog.get(element) finds a dialog either way.
  */
 (function (window, document) {
     'use strict';
 
     var Exp = window.Exp;
-    if (!Exp || !Exp.$) {
-        // the core runs without jQuery (exp::core::shared on a page that loads none); this module needs it
-        if (Exp && Exp.ready && window.console) { window.console.error('Exp: exp::dialog needs jQuery 4, and this page has none; request ezjsc::jquery before exp::core::shared'); }
+    if (!Exp || !Exp.config || !Exp.util) { return; }
+    if (Exp.dialog && Exp.dialog.Dialog) {
+        // loaded twice: the first copy stays, with its open dialogs
         return;
     }
-    var $ = Exp.$;
+    var util = Exp.util;
 
     var SIZES = ['s', 'm', 'l', 'xl'];
     var FOCUSABLE = 'a[href], area[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), ' +
@@ -35,6 +42,7 @@
                     'summary, [tabindex]:not([tabindex="-1"])';
     var counter = 0;
     var openDialogs = [];
+    var dialogs = new WeakMap();
 
     function t(text, params) { return Exp.i18n(text, params); }
 
@@ -49,15 +57,83 @@
         });
     }
 
+    // ---- the DOM, with jQuery where the page has it ---------------------------------------------------------
+
+    function make(tag, attrs) {
+        var el = document.createElement(tag);
+        Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+        return el;
+    }
+    /** The first element of a selector (inside context, when given), an element, a list or jQuery, or null. */
+    function first(jq, target, context) {
+        if (jq) { return (context ? jq(target, context) : jq(target))[0] || null; }
+        if (!target) { return null; }
+        if (typeof target === 'string') { return (context || document).querySelector(target); }
+        return target.nodeType ? target : target[0] || null;
+    }
+    function remove(jq, el) { if (jq) { jq(el).remove(); } else if (el.parentNode) { el.parentNode.removeChild(el); } }
+    function empty(jq, el) { if (jq) { jq(el).empty(); } else { while (el.firstChild) { el.removeChild(el.firstChild); } } }
+    /** jQuery's .append(): a node, a fragment, HTML, or a list of them (jQuery, NodeList, array) */
+    function append(el, content) {
+        if (content === null || content === undefined) { return; }
+        if (typeof content === 'string') { el.insertAdjacentHTML('beforeend', content); return; }
+        if (content.nodeType) { el.appendChild(content); return; }
+        Array.prototype.slice.call(content).forEach(function (c) { append(el, c); });
+    }
+    /** HTML with its <script> elements run (as jQuery's .html()); new script elements, so the browser runs them */
+    function htmlWithScripts(el, html) {
+        el.innerHTML = html;
+        Array.prototype.forEach.call(el.querySelectorAll('script'), function (old) {
+            var s = document.createElement('script');
+            Array.prototype.forEach.call(old.attributes, function (a) { s.setAttribute(a.name, a.value); });
+            s.text = old.text;
+            old.parentNode.replaceChild(s, old);
+        });
+    }
+
+    /**
+     * A listener: through jQuery when there is one (so .trigger() reaches it), else as jQuery would bind it: a
+     * selector delegates (no clicks of other buttons or on disabled elements), this is the matched element.
+     */
+    function listen(jq, el, type, selector, fn) {
+        if (jq) { jq(el).on(type, selector || null, fn); return; }
+        el.addEventListener(type.split('.')[0], selector ? function (e) {
+            if (e.type === 'click' && e.button >= 1) { return; }
+            for (var cur = e.target; cur && cur !== el; cur = cur.parentNode) {
+                if (cur.nodeType === 1 && !(e.type === 'click' && cur.disabled === true) && cur.matches(selector)) { fn.call(cur, e); return; }
+            }
+        } : fn);
+    }
+
+    /**
+     * An event on the element: through jQuery when the dialog has it (handlers get (event, data)), and as a native
+     * CustomEvent (event.detail is the data). While the CustomEvent is dispatched, the jQuery that triggered is told
+     * it is triggered already (jQuery.event.triggered), so its handlers run once; any other jQuery gets the native
+     * event like any listener.
+     */
+    function fire(el, name, data, jq) {
+        if (jq) { jq(el).trigger(name, [data]); }
+        var guarded = jq && jq.event ? [jq] : [];
+        var was = guarded.map(function (j) { var w = j.event.triggered; j.event.triggered = name; return w; });
+        try {
+            el.dispatchEvent(new window.CustomEvent(name, { bubbles: true, detail: data }));
+        } finally {
+            guarded.forEach(function (j, i) { j.event.triggered = was[i]; });
+        }
+    }
+
+    // ---- the dialog -----------------------------------------------------------------------------------------
+
     /**
      * A dialog. Created closed; open() shows it as a modal and returns a Promise of the value it is closed with.
-     * Options: see the header and doc/modules/dialog.md.
+     * Options: see the header and doc/modules/dialog.md. jq: the jQuery it runs on (default Exp.$; null: none).
      */
-    function Dialog(options) {
+    function Dialog(options, jq) {
         var self = this;
+        this.jq = jq = jq === undefined ? (Exp.$ || null) : jq;
         counter += 1;
         this.id = 'exp-dialog-' + counter;
-        this.options = $.extend({
+        this.options = (jq ? jq.extend : util.extend)({
             title: '', content: null, url: null, template: null, buttons: [], size: 'm', width: null,
             className: '', dismissible: true, closeOnBackdrop: false, closeSelector: null, initialFocus: null,
             role: 'dialog', describedBy: null, keep: false, scripts: false, onOpen: null, onClose: null
@@ -69,162 +145,198 @@
         this.resolver = null;
 
         var o = this.options;
-        var $el = this.$el = $('<dialog class="exp-dialog exp-scope"></dialog>')
-            .attr({ id: this.id, 'aria-labelledby': this.id + '-title' })
-            .addClass(SIZES.indexOf(o.size) !== -1 ? 'exp-dialog--' + o.size : 'exp-dialog--m');
-        if (o.role === 'alertdialog') { $el.attr('role', 'alertdialog'); }
-        if (o.className) { $el.addClass(o.className); }
-        if (o.width) { $el.css('width', typeof o.width === 'number' ? 'min(' + o.width + 'px, calc(100vw - 2rem))' : o.width); }
-        this.element = $el[0];
+        var el = this.element = make('dialog', { 'class': 'exp-dialog exp-scope', id: this.id, 'aria-labelledby': this.id + '-title' });
+        el.classList.add(SIZES.indexOf(o.size) !== -1 ? 'exp-dialog--' + o.size : 'exp-dialog--m');
+        if (o.role === 'alertdialog') { el.setAttribute('role', 'alertdialog'); }
+        if (o.className) { String(o.className).split(/\s+/).filter(Boolean).forEach(function (c) { el.classList.add(c); }); }
+        if (o.width) { el.style.width = typeof o.width === 'number' ? 'min(' + o.width + 'px, calc(100vw - 2rem))' : o.width; }
 
-        var $frame = $('<div class="exp-dialog-frame"></div>').appendTo($el);
-        this.$header = $('<header class="exp-dialog-header"></header>').appendTo($frame);
-        this.$title = $('<h2 class="exp-dialog-title"></h2>').attr('id', this.id + '-title').appendTo(this.$header);
-        this.$close = $('<button type="button" class="exp-dialog-close"><span aria-hidden="true">&times;</span></button>')
-            .attr({ 'aria-label': t('Close'), title: t('Close') }).appendTo(this.$header);
-        if (!o.dismissible) { this.$close.prop('hidden', true); }
-        this.$body = this.body = $('<div class="exp-dialog-body"></div>').attr('id', this.id + '-body').appendTo($frame);
-        this.$error = $('<div class="exp-dialog-error" role="alert" hidden></div>').insertBefore(this.$body);
-        this.$footer = $('<footer class="exp-dialog-footer" hidden></footer>').appendTo($frame);
+        var frame = el.appendChild(make('div', { 'class': 'exp-dialog-frame' }));
+        this.header = frame.appendChild(make('header', { 'class': 'exp-dialog-header' }));
+        this.heading = this.header.appendChild(make('h2', { 'class': 'exp-dialog-title', id: this.id + '-title' }));
+        this.closeButton = make('button', { type: 'button', 'class': 'exp-dialog-close' });
+        this.closeButton.innerHTML = '<span aria-hidden="true">&times;</span>';
+        this.closeButton.setAttribute('aria-label', t('Close'));
+        this.closeButton.setAttribute('title', t('Close'));
+        this.header.appendChild(this.closeButton);
+        if (!o.dismissible) { this.closeButton.hidden = true; }
+        this.body = frame.appendChild(make('div', { 'class': 'exp-dialog-body', id: this.id + '-body' }));
+        this.errorElement = make('div', { 'class': 'exp-dialog-error', role: 'alert', hidden: '' });
+        frame.insertBefore(this.errorElement, this.body);
+        this.footer = frame.appendChild(make('footer', { 'class': 'exp-dialog-footer', hidden: '' }));
 
         this.setTitle(o.title);
-        if (o.describedBy) { $el.attr('aria-describedby', o.describedBy); }
+        if (o.describedBy) { el.setAttribute('aria-describedby', o.describedBy); }
         this.setButtons(o.buttons);
 
         // native Escape: dismiss (the dialog closes itself only through close(), so the Promise is always settled)
-        $el.on('cancel', function (e) {
+        listen(jq, el, 'cancel', null, function (e) {
             e.preventDefault();
             if (self.options.dismissible) { self.close(null); }
         });
         // closed by anything else (form method=dialog, the browser): settle as dismissed
-        $el.on('close', function () {
+        listen(jq, el, 'close', null, function () {
             if (self.isOpen) { self.finish(self.element.returnValue && self.element.returnValue !== '' ? self.element.returnValue : null); }
         });
         // Tab and Shift+Tab stay inside
-        $el.on('keydown', function (e) {
+        listen(jq, el, 'keydown', null, function (e) {
             if (e.key !== 'Tab') { return; }
             var list = focusables(self.element);
             if (!list.length) { e.preventDefault(); self.element.focus(); return; }
-            var first = list[0], last = list[list.length - 1], active = document.activeElement;
-            if (e.shiftKey && (active === first || !self.element.contains(active))) { e.preventDefault(); last.focus(); }
-            else if (!e.shiftKey && (active === last || !self.element.contains(active))) { e.preventDefault(); first.focus(); }
+            var firstOne = list[0], last = list[list.length - 1], active = document.activeElement;
+            if (e.shiftKey && (active === firstOne || !self.element.contains(active))) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && (active === last || !self.element.contains(active))) { e.preventDefault(); firstOne.focus(); }
         });
         // the close button, [data-exp-dialog-close] and closeSelector inside; the backdrop (a click on <dialog> itself)
-        $el.on('click', function (e) {
+        listen(jq, el, 'click', null, function (e) {
             if (e.target === self.element) {
                 if (self.options.closeOnBackdrop && self.options.dismissible) { self.close(null); }
                 return;
             }
-            var closer = $(e.target).closest('.exp-dialog-close, [data-exp-dialog-close]' + (self.options.closeSelector ? ', ' + self.options.closeSelector : ''), self.element);
-            if (closer.length && closer.closest('dialog')[0] === self.element) {
+            var selector = '.exp-dialog-close, [data-exp-dialog-close]' + (self.options.closeSelector ? ', ' + self.options.closeSelector : '');
+            var closer = jq ? jq(e.target).closest(selector, self.element)[0] : closestWithin(e.target, selector, self.element);
+            if (closer && closer.closest('dialog') === self.element) {
                 e.preventDefault();
-                var v = closer.attr('data-exp-dialog-close');
-                self.close(v === undefined || v === '' ? null : v);
+                var v = closer.getAttribute('data-exp-dialog-close');
+                self.close(v === null || v === '' ? null : v);
             }
         });
 
         // in the page from the start (a closed <dialog> is not shown), so content that runs scripts (scripts: true) runs them
-        document.body.appendChild(this.element);
+        document.body.appendChild(el);
         if (o.content !== null && o.content !== undefined) { this.setContent(o.content); }
         else if (o.template) {
             // a <template> (its content cloned) or any element (its children cloned)
-            var tpl = $(o.template)[0];
-            if (tpl) { this.setContent(tpl.content ? document.importNode(tpl.content, true) : $(tpl).clone().contents()); }
+            var tpl = first(jq, o.template);
+            if (tpl) {
+                this.setContent(tpl.content ? document.importNode(tpl.content, true)
+                                            : (jq ? jq(tpl).clone().contents() : Array.prototype.slice.call(tpl.cloneNode(true).childNodes)));
+            }
         }
-        $el.data('expDialog', this);
+        dialogs.set(el, this);
+        if (jq) { jq(el).data('expDialog', this); }
     }
+
+    /** .closest(selector) from node, not beyond root (as jQuery's .closest(selector, root)) */
+    function closestWithin(node, selector, root) {
+        for (var cur = node && node.nodeType === 1 ? node : node && node.parentElement; cur && cur !== root; cur = cur.parentElement) {
+            if (cur.matches(selector)) { return cur; }
+        }
+        return null;
+    }
+
+    // the parts in jQuery, while the dialog runs on it (undefined without jQuery), for code written for it
+    var PARTS = { $el: 'element', $header: 'header', $title: 'heading', $close: 'closeButton', $body: 'body', $error: 'errorElement', $footer: 'footer' };
+    Object.keys(PARTS).forEach(function (name) {
+        Object.defineProperty(Dialog.prototype, name, {
+            configurable: true,
+            get: function () { var v = this[PARTS[name]]; return this.jq && v ? this.jq(v) : undefined; },
+            set: function (v) { Object.defineProperty(this, name, { value: v, writable: true, configurable: true, enumerable: true }); }
+        });
+    });
 
     /** The title, as text. Without a title the header keeps only the close button, and the body names the dialog. */
     Dialog.prototype.setTitle = function (title) {
-        this.$title.text(title === null || title === undefined ? '' : String(title));
-        var has = this.$title.text() !== '';
-        this.$title.prop('hidden', !has);
-        this.$el.attr('aria-labelledby', has ? this.id + '-title' : (this.options.labelledBy || this.id + '-body'));
+        this.heading.textContent = title === null || title === undefined ? '' : String(title);
+        var has = this.heading.textContent !== '';
+        this.heading.hidden = !has;
+        this.element.setAttribute('aria-labelledby', has ? this.id + '-title' : (this.options.labelledBy || this.id + '-body'));
         return this;
     };
 
     /** The content: an HTML string (from the server or a template), an element, jQuery, a fragment, or a function returning one. */
     Dialog.prototype.setContent = function (content) {
+        var jq = this.jq;
         if (typeof content === 'function') { content = content.call(this, this); }
-        this.$body.empty();
+        empty(jq, this.body);
         if (content === null || content === undefined || content === '') { return this; }
         if (typeof content === 'string') {
             // HTML is inserted, its <script> elements are not run (no eval; options.scripts: true runs them, as jQuery's html())
-            if (this.options.scripts) { this.$body.html(content); } else { this.$body[0].innerHTML = content; }
-        } else { this.$body.append(content); }
-        Exp.start(this.$body[0]);
+            if (!this.options.scripts) { this.body.innerHTML = content; }
+            else if (jq) { jq(this.body).html(content); }
+            else { htmlWithScripts(this.body, content); }
+        } else if (jq) { jq(this.body).append(content); } else { append(this.body, content); }
+        Exp.start(this.body);
         return this;
     };
 
-    /** The footer buttons: [{ label, value, primary, danger, close (default true), action(dialog) -> false keeps it open }]. */
+    /** The footer buttons: [{ label, value, primary, danger, close (default true), action(dialog, event) -> false keeps it open }]. */
     Dialog.prototype.setButtons = function (buttons) {
-        var self = this;
-        this.$footer.empty();
+        var self = this, jq = this.jq;
+        empty(jq, this.footer);
         (buttons || []).forEach(function (b) {
-            var $b = $('<button type="button" class="exp-dialog-button"></button>').text(b.label === undefined ? String(b.value) : b.label);
-            if (b.primary) { $b.addClass('is-primary'); }
-            if (b.danger) { $b.addClass('is-danger'); }
-            if (b.name) { $b.attr('name', b.name); }
-            $b.on('click', function (e) {
+            var button = make('button', { type: 'button', 'class': 'exp-dialog-button' });
+            button.textContent = b.label === undefined ? String(b.value) : b.label;
+            if (b.primary) { button.classList.add('is-primary'); }
+            if (b.danger) { button.classList.add('is-danger'); }
+            if (b.name) { button.setAttribute('name', b.name); }
+            listen(jq, button, 'click', null, function (e) {
                 e.preventDefault();
                 var keep = typeof b.action === 'function' ? b.action.call(self, self, e) === false : false;
                 if (!keep && b.close !== false) { self.close(b.value === undefined ? null : b.value); }
             });
-            $b.data('expDialogButton', b);
-            self.$footer.append($b);
+            if (jq) { jq(button).data('expDialogButton', b); }
+            self.footer.appendChild(button);
         });
-        this.$footer.prop('hidden', !this.$footer.children().length);
+        this.footer.hidden = !this.footer.children.length;
         return this;
     };
 
     /** Shows a translated error above the body (role alert); empty or no text hides it. */
     Dialog.prototype.error = function (text) {
-        this.$error.text(text || '').prop('hidden', !text);
+        this.errorElement.textContent = text || '';
+        this.errorElement.hidden = !text;
         return this;
     };
 
     /** While busy: aria-busy, the body dimmed and not clickable, "Loading..." for screen readers. */
     Dialog.prototype.busy = function (on) {
-        this.$el.toggleClass('exp-dialog--busy', !!on).attr('aria-busy', on ? 'true' : 'false');
-        if (on && !this.$el.find('.exp-dialog-spinner').length) {
-            $('<div class="exp-dialog-spinner" role="status"></div>').append($('<span class="exp-visually-hidden"></span>').text(t('Loading...')))
-                .insertBefore(this.$body);
+        var jq = this.jq, el = this.element;
+        el.classList.toggle('exp-dialog--busy', !!on);
+        el.setAttribute('aria-busy', on ? 'true' : 'false');
+        if (on && !el.querySelector('.exp-dialog-spinner')) {
+            var spinner = make('div', { 'class': 'exp-dialog-spinner', role: 'status' });
+            var label = spinner.appendChild(make('span', { 'class': 'exp-visually-hidden' }));
+            label.textContent = t('Loading...');
+            this.body.parentNode.insertBefore(spinner, this.body);
         } else if (!on) {
-            this.$el.find('.exp-dialog-spinner').remove();
+            Array.prototype.forEach.call(el.querySelectorAll('.exp-dialog-spinner'), function (s) { remove(jq, s); });
         }
         return this;
     };
 
     /** Loads HTML into the body (GET, or opts.method/opts.data), busy meanwhile; a Promise of the HTML. */
     Dialog.prototype.load = function (url, opts) {
-        var self = this;
+        var self = this, jq = this.jq;
         opts = opts || {};
         this.busy(true).error('');
+        var request = { url: url, method: (opts.method || 'GET').toUpperCase(), data: opts.data, dataType: 'html', headers: { Accept: 'text/html,*/*' } };
         return new Promise(function (resolve, reject) {
-            $.ajax({ url: url, method: (opts.method || 'GET').toUpperCase(), data: opts.data, dataType: 'html', headers: { Accept: 'text/html,*/*' } })
+            (jq ? jq.ajax(request) : util.request(request))
                 .then(function (html) {
                     self.busy(false).setContent(html);
                     resolve(html);
                 }, function (xhr) {
                     var status = xhr ? xhr.status : 0;
                     self.busy(false).error(status ? t('The server answered with an error (HTTP %status).', { '%status': status }) : t('No answer from the server.'));
-                    reject(Exp.io && Exp.io.Error ? new Exp.io.Error(status ? 'server' : 'network', status, self.$error.text(), xhr) : new Error(self.$error.text()));
+                    var message = self.errorElement.textContent;
+                    reject(Exp.io && Exp.io.Error ? new Exp.io.Error(status ? 'server' : 'network', status, message, xhr) : new Error(message));
                 });
         });
     };
 
     /** Where the focus goes on open: initialFocus, [autofocus], the first field of the body, the primary button, close. */
     Dialog.prototype.focusTarget = function () {
-        var o = this.options, el = this.element;
-        var pick = o.initialFocus ? $(o.initialFocus, el)[0] || $(o.initialFocus)[0] : null;
+        var o = this.options, el = this.element, jq = this.jq;
+        var pick = o.initialFocus ? first(jq, o.initialFocus, el) || first(jq, o.initialFocus) : null;
         if (pick && el.contains(pick)) { return pick; }
         var auto = el.querySelector('[autofocus]');
         if (auto) { return auto; }
-        var inBody = focusables(this.$body[0]);
+        var inBody = focusables(this.body);
         if (inBody.length) { return inBody[0]; }
-        var primary = this.$footer.find('.is-primary')[0] || this.$footer.find('button')[0];
+        var primary = this.footer.querySelector('.is-primary') || this.footer.querySelector('button');
         if (primary) { return primary; }
-        return visible(this.$close[0]) ? this.$close[0] : el;
+        return visible(this.closeButton) ? this.closeButton : el;
     };
 
     /** Shows it as a modal; a Promise of the value it is closed with (null when dismissed). */
@@ -245,7 +357,7 @@
         focus();
         if (loading) { loading.then(focus, focus); }
         if (typeof o.onOpen === 'function') { o.onOpen.call(this, this); }
-        this.$el.trigger('exp:dialog:open', [{ dialog: this }]);
+        fire(this.element, 'exp:dialog:open', { dialog: this }, this.jq);
         Exp.emit('exp:dialog:open', { dialog: this });
         return this.promise;
     };
@@ -269,18 +381,18 @@
         if (typeof this.options.onClose === 'function') {
             try { this.options.onClose.call(this, value, this); } catch (e) { if (window.console) { window.console.error('Exp.dialog: onClose failed', e); } }
         }
-        this.$el.trigger('exp:dialog:close', [{ dialog: this, value: value }]);
+        fire(this.element, 'exp:dialog:close', { dialog: this, value: value }, this.jq);
         Exp.emit('exp:dialog:close', { dialog: this, value: value });
         var back = this.returnFocus;
         if (back && document.contains(back) && typeof back.focus === 'function') { back.focus(); }
-        if (!this.options.keep) { this.$el.remove(); }
+        if (!this.options.keep) { remove(this.jq, this.element); }
         if (this.resolver) { this.resolver(value); }
     };
 
     /** Closes it and removes it from the page. */
     Dialog.prototype.destroy = function () {
         this.close(null);
-        this.$el.remove();
+        remove(this.jq, this.element);
     };
 
     // ---- the shortcuts ----------------------------------------------------------------------------------------
@@ -294,7 +406,9 @@
 
     /** A paragraph with the text (as text), the dialog's description and, without a title, its name. */
     function textBody(id, text) {
-        return $('<p class="exp-dialog-text"></p>').attr('id', id).text(String(text === undefined || text === null ? '' : text));
+        var p = make('p', { 'class': 'exp-dialog-text', id: id });
+        p.textContent = String(text === undefined || text === null ? '' : text);
+        return p;
     }
 
     function confirm(text, opts) {
@@ -334,16 +448,16 @@
      */
     function form(url, opts) {
         opts = opts || {};
-        var d = new Dialog($.extend({}, opts, { url: url || null, content: opts.content === undefined ? null : opts.content,
-                                                className: 'exp-dialog--form' + (opts.className ? ' ' + opts.className : '') }));
-        d.$body.on('submit', 'form', function (e) {
+        var d = new Dialog(util.extend({}, opts, { url: url || null, content: opts.content === undefined ? null : opts.content,
+                                                   className: 'exp-dialog--form' + (opts.className ? ' ' + opts.className : '') }));
+        listen(d.jq, d.body, 'submit', 'form', function (e) {
             e.preventDefault();
             if (!Exp.io || !Exp.io.form) {
                 d.error(t('The server answered with an error (HTTP %status).', { '%status': 0 }));
                 if (window.console) { window.console.error('Exp.dialog.form needs exp::io'); }
                 return;
             }
-            var f = this, submitter = e.originalEvent && e.originalEvent.submitter ? e.originalEvent.submitter : null;
+            var f = this, native = e.originalEvent || e, submitter = native.submitter || null;
             d.busy(true).error('');
             Exp.io.form(f, { submitter: submitter, url: opts.action }).then(function (answer) {
                 d.busy(false);
@@ -363,13 +477,21 @@
 
     function closeAll() { openDialogs.slice().reverse().forEach(function (d) { d.close(null); }); }
 
+    /** The dialog of a <dialog> element (or a selector), or null. */
+    function get(el) {
+        el = first(null, el);
+        return (el && dialogs.get(el)) || null;
+    }
+
     Exp.dialog = {
         open: open, confirm: confirm, alert: alert, form: form,
         create: function (options) { return new Dialog(options); },
-        current: current, closeAll: closeAll, Dialog: Dialog
+        current: current, closeAll: closeAll, get: get, Dialog: Dialog
     };
 
     // ---- from markup ------------------------------------------------------------------------------------------
+
+    var confirmed = new WeakSet();
 
     /**
      * data-exp-dialog on a link or button:
@@ -378,11 +500,12 @@
      *   '{"title": "…", "template": "#tpl"}'          opens the template's content
      *   (anything else)                                opens the link's address (or "url") in a dialog
      */
-    Exp.register('dialog', function ($el, options) {
-        $el.on('click.expdialog', function (e) {
-            if ($el.data('expDialogConfirmed')) { $el.removeData('expDialogConfirmed'); return; }
+    Exp.register('dialog', function (target, options) {
+        var el = target && target.jquery ? target[0] : target;
+        listen(Exp.$ || null, el, 'click.expdialog', null, function (e) {
+            if (confirmed.has(el)) { confirmed.delete(el); return; }
             e.preventDefault();
-            var el = this, href = options.url || $el.attr('href') || null;
+            var href = options.url || el.getAttribute('href') || null;
             if (options.confirm) {
                 confirm(options.confirm, options).then(function (ok) {
                     if (!ok) { return; }
@@ -390,7 +513,7 @@
                         if (typeof el.form.requestSubmit === 'function') {
                             el.form.requestSubmit(el);          // submits with this button, without a click
                         } else {
-                            $el.data('expDialogConfirmed', true);   // the click below goes through once
+                            confirmed.add(el);                  // the click below goes through once
                             el.click();
                         }
                     } else if (href) {
@@ -400,7 +523,7 @@
             } else if (options.form) {
                 form(href, options);
             } else {
-                open($.extend({}, options, { url: options.template ? null : href }));
+                open(util.extend({}, options, { url: options.template ? null : href }));
             }
         });
     });

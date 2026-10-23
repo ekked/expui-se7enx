@@ -33,13 +33,13 @@ nothing: the running core, its events and its modules stay.
 | Key | Loads |
 |---|---|
 | `exp::core::shared` | the core without its own jQuery when `ezjsc::jquery`, earlier in the same list, loads the same jQuery release (compared by file name); otherwise like `exp::core`. On a page that requests no `ezjsc::jquery` the page then has no jQuery: the core runs on plain JavaScript (see [Without jQuery](#without-jquery)) |
-| `exp::collapse` | `Exp.collapse()`, `$.fn.expCollapse` (needs the core) |
-| `exp::sticky` | `Exp.sticky`, `$.fn.expSticky` (needs the core) |
+| `exp::collapse` | `Exp.collapse()`, `$.fn.expCollapse` (when the page has jQuery; needs the core) |
+| `exp::sticky` | `Exp.sticky`, `$.fn.expSticky` (when the page has jQuery; needs the core) |
 | `exp::dialog` | `Exp.dialog`, `data-exp-dialog` (needs the core; `Exp.dialog.form()` also `exp::io`) |
-| `exp::upload` | `Exp.upload`, `$.fn.expUpload`, `data-exp-upload` (needs the core; `exp::io` gives failures their `Exp.io.Error` type) |
+| `exp::upload` | `Exp.upload.create()`, `$.fn.expUpload` (when the page has jQuery), `data-exp-upload` (needs the core; `exp::io` gives failures their `Exp.io.Error` type) |
 | `exp::datatable` | `Exp.datatable.create()`, `$.fn.expDataTable` (when the page has jQuery), `data-exp-datatable` (needs the core; `exp::io` for server sources) |
-| `exp::datepicker` | `Exp.datepicker`, `$.fn.expDatePicker`, `window.showDatePicker()` (needs the core) |
-| `exp::autosave` | `Exp.autosave`, `$.fn.expAutosave`, `$.fn.expPreview` (needs the core; the preview also `exp::collapse`) |
+| `exp::datepicker` | `Exp.datepicker`, `Exp.datepicker.create()`, `$.fn.expDatePicker` (when the page has jQuery), `window.showDatePicker()` (needs the core) |
+| `exp::autosave` | `Exp.autosave`, `$.fn.expAutosave`, `$.fn.expPreview` (when the page has jQuery; needs the core and, with the preview, `exp::collapse`) |
 
 Their stylesheets: `exp/dialog.css`, `exp/upload.css`, `exp/datatable.css`,
 `exp/datepicker.css` (and `exp/autosave.css`, empty for now), each on top of
@@ -49,26 +49,49 @@ every stylesheet, on every page.
 ### Without jQuery
 
 `exp::core::shared` on a page that loads no jQuery: `Exp.$` is `undefined`, and the core,
-`exp::io` and `exp::datatable` work on plain JavaScript, with the same API (the differences are
-named where they are documented below: `Exp.ready()`'s `$`, what `Exp.register()` hands over,
-`Exp.io.raw()`, the datatable's callbacks). Server calls go through `fetch`, sent as jQuery sent
-them: the same address, method, fields (`Exp.util.param()`), form token, `Accept` and
-`X-Requested-With` headers, cookies for the same origin.
+`exp::io` and every module but `exp::compat` work on plain JavaScript, with the same API (the
+differences are named where they are documented below: `Exp.ready()`'s `$`, what
+`Exp.register()` hands over, `Exp.io.raw()`, the callbacks and parts that were jQuery). Server
+calls go through `fetch`, sent as jQuery sent them: the same address, method, fields
+(`Exp.util.param()`), form token, `Accept` and `X-Requested-With` headers, cookies for the same
+origin. The uploads stay `XMLHttpRequest`s, as they were.
 
 | Needs jQuery 4 (`Exp.$`) | Works without it |
 |---|---|
-| `exp::compat`, `exp::collapse`, `exp::sticky`, `exp::dialog`, `exp::upload`, `exp::datepicker`, `exp::autosave` | `exp::core`, `exp::io`, `exp::datatable` |
+| `exp::compat` (`$.ez()` hands back a jqXHR) | `exp::core`, `exp::io`, `exp::collapse`, `exp::sticky`, `exp::dialog`, `exp::upload`, `exp::datatable`, `exp::datepicker`, `exp::autosave` |
 
-A module of the first column requested on a page without jQuery sets nothing up and says so in
-the browser console (`Exp: exp::dialog needs jQuery 4, and this page has none; request
-ezjsc::jquery before exp::core::shared`); request `ezjsc::jquery` in front of
-`exp::core::shared` for it. With jQuery 4 on the page, everything runs on it exactly as before.
+What changes for code written without jQuery, module by module:
+
+| Module | Entry point without jQuery | jQuery's part, kept where the page has jQuery |
+|---|---|---|
+| `exp::collapse` | `Exp.collapse(conf)`, `Exp.collapse.get(link)`; the instance's `links` (elements) | `$.fn.expCollapse`, `instance.$link`, `$(link).data('expCollapse')` |
+| `exp::sticky` | `Exp.sticky.start(toolbar, options)` (an element, a selector or jQuery), `Exp.sticky.get(toolbar)`; `toolbar`, `form`, `startElement`, `toTop` | `$.fn.expSticky`, `$(toolbar).data('expSticky')` |
+| `exp::dialog` | `Exp.dialog.*`, `Exp.dialog.get(element)`; the parts `element`, `header`, `heading`, `closeButton`, `body`, `errorElement`, `footer`; a button's `action(dialog, event)` gets the browser's event | `$el`, `$header`, `$title`, `$close`, `$body`, `$error`, `$footer`, `$(element).data('expDialog')` |
+| `exp::upload` | `Exp.upload.create(el, options)`, `Exp.upload.get(el)`; `el`, `root`, `zone`, `input`, `inputs`, `listElement`, `dropZones`; a file's `row`, `bar`, `statusElement`, `cancelButton` | `$.fn.expUpload`, `$el`, `$root`, `$input`, `$zone`, `$list`, `$drop`; a file's `$row`, `$bar`, `$status`, `$cancel` |
+| `exp::datepicker` | `Exp.datepicker.create(box, options)` → `{ button, fields }`, `Exp.datepicker.get(box)`, `Exp.datepicker.open()`, `showDatePicker()`; the events' `fields` are elements (`null` for a missing time) | `$.fn.expDatePicker`; the events' `fields` in jQuery |
+| `exp::autosave` | `new Exp.autosave.AutoSubmit(conf)`, `new Exp.autosave.Preview(conf)`; the preview's `linkElement`, `placeElement`, `previewElement` | `$.fn.expAutosave`, `$.fn.expPreview`; the preview's `link`, `place`, `preview` |
+
+Events a module triggers on its element (`exp:dialog:*`, `exp:upload:*`, `exp:datatable:*`) are
+also `CustomEvent`s that bubble, the data in `event.detail`; with jQuery on the page they are
+triggered through jQuery as well, and each listener hears an event once (while the
+`CustomEvent` is dispatched, the jQuery that triggered it is told it is triggered already,
+`jQuery.event.triggered`). Without jQuery the fields the date picker fills get a native `change`
+event, where jQuery's `.trigger('change')` reached only jQuery's handlers and the `onchange`
+attribute.
+
+`exp::compat` requested on a page without jQuery sets nothing up and says so in the browser
+console (`Exp: exp::compat needs jQuery 4, and this page has none; request
+ezjsc::jquery before exp::core::shared`). With jQuery 4 on the page, everything runs on it exactly as before: the
+listeners are bound through it (so `.trigger()` reaches them), the animations are its
+`.animate()`, the requests its `$.ajax()`.
 
 The core takes the jQuery that is on the page when it boots. A jQuery that arrives later (a
 template further down the page requests `ezjsc::jquery` after another one requested
-`exp::core::shared`) is not taken over: `Exp.$` stays undefined, the modules of the first column
-say so in the console, and the data table keeps running without jQuery. A page that needs one of
-those modules requests `ezjsc::jquery` in the same list, in front of `exp::core::shared`.
+`exp::core::shared`) is not taken over: `Exp.$` stays undefined, `exp::compat` says so in the
+console, and the other modules keep running without jQuery. Their jQuery plugins can be put on
+such a jQuery with `Exp.<module>.install(jQuery)` (`Exp.collapse`, `Exp.sticky`,
+`Exp.datepicker`, `Exp.upload`, `Exp.autosave`, `Exp.datatable`). A page that needs `exp::compat`
+requests `ezjsc::jquery` in the same list, in front of `exp::core::shared`.
 
 `Exp` core (`exp::core`)
 -----------------------
@@ -197,6 +220,9 @@ What the plain JavaScript parts use, for code that should run without jQuery:
 | `Exp.util.param(fields)` | `jQuery.param()`'s encoding (`a[b]=1`, `a[]=1`, an array of `{name, value}`); it is `jQuery.param` when the page has jQuery |
 | `Exp.util.isPlainObject(value)` | as `jQuery.isPlainObject()` |
 | `Exp.util.request(options)` → Promise | a request as `jQuery.ajax()` sends it, on `fetch`: `url`, `method` (`GET`), `data` (fields, a string or `FormData`; added to the address for GET), `dataType` (`'json'`, or the answer's own type), `headers`, `timeout`, `signal`. Form fields go as `application/x-www-form-urlencoded` (`%20` as `+`), `X-Requested-With: XMLHttpRequest` to the same origin, cookies to the same origin only. Rejects with `{ status, statusText, textStatus, responseText, responseJSON, responseURL, getResponseHeader() }` (`textStatus`: `error`, `timeout`, `abort`, `parsererror`); the Promise has `abort()` |
+| `Exp.util.css(el, name, value)`, `Exp.util.css(el, { name: value })` | sets styles as jQuery's `.css()` does: a number gets `px` where jQuery adds it (`width`, `top`, `margin…`, not `opacity`), `+=`/`-=`, no negative `width` or `height`, `null` skipped |
+| `Exp.util.animate(el, props, ms, complete)` | as jQuery's `.animate()`: the start value read (and converted to the end's unit) as jQuery reads it, its "swing" steps on one timer for every animation (animation frames while the page is visible, else every 13 ms), `overflow: hidden` while a `width` or `height` changes, a value `'show'` or `'hide'` fades in or out (`.fadeIn()`, `.fadeOut()`); started while none runs, the first step is made at once, so one of 0 ms ends at once; `complete` runs with `this` the element |
+| `Exp.util.stop(el, jumpToEnd)` | as jQuery's `.stop(true, jumpToEnd)`: stops the element's animations; jumping to the end sets the end values and runs `complete` |
 
 `Exp.io` (`exp::io`)
 -------------------
@@ -307,11 +333,15 @@ Exp.collapse({
 - Each change emits `exp:collapse` with `{ link, collapsed }`.
 
 Instance: `collapse()`, `uncollapse()` (also `expand()`), `toggle()`,
-`conf.collapsed`; `$(link).data('expCollapse')`.
+`conf.collapsed`, `links` (the link elements); with jQuery also `$link` and
+`$(link).data('expCollapse')`. `Exp.collapse.get(link)` finds the instance either way.
+Without jQuery the styles are set and animated with `Exp.util.css()` and
+`Exp.util.animate()`, by jQuery's rules; with jQuery through it, as before.
 
 ### `$(el).expCollapse(conf)`
 
-The same, with `conf.link` = each element. Everything about it:
+The same, with `conf.link` = each element, where the page has jQuery
+(`Exp.collapse.install(jQuery)` for one loaded later). Everything about it:
 [modules/collapse.md](modules/collapse.md).
 
 `exp::sticky`
@@ -332,8 +362,12 @@ uses its class, so the admin's styles and other extensions keep working:
 | `scrollToStart` | `true` | on load, scroll to the start and focus the form's first text field |
 | `toTopOpacity`, `fade` | `0.85`, `500` | the link's opacity (the default keeps its text at a contrast of at least 4.5:1), and its fade in ms (0 with reduced motion) |
 
-Instance: `active` (`false` on a page without the form), `formY` (the scroll
-position where it fixes), `onScroll()`.
+`toolbar` is an element, a selector or jQuery (the first one); no jQuery needed. Instance:
+`active` (`false` on a page without the form), `formY` (the scroll position where it fixes),
+`onScroll()`, and the elements `toolbar`, `form`, `startElement`, `toTop`.
+`Exp.sticky.get(toolbar)` finds it; with jQuery also `$(toolbar).data('expSticky')`.
+`$.fn.expSticky` is there where the page has jQuery (`Exp.sticky.install(jQuery)` for one loaded
+later).
 
 ### `Exp.sticky.admin()`
 
@@ -367,22 +401,35 @@ Each returned Promise has the dialog as `.dialog`. Options of `open`: `title`,
 
 The dialog: `open()`, `close(value)`, `setTitle()`, `setContent()`,
 `setButtons()`, `load(url, { method, data })`, `busy(on)`, `error(text)`,
-`destroy()`; `isOpen`, `value`, `element`, `$body`;
-`$(dialog.element).data('expDialog')`.
+`destroy()`; `isOpen`, `value`; its parts as elements: `element`, `header`, `heading`,
+`closeButton`, `body`, `errorElement`, `footer`; with jQuery also in jQuery (`$el`, `$header`,
+`$title`, `$close`, `$body`, `$error`, `$footer`) and `$(dialog.element).data('expDialog')`.
+`Exp.dialog.get(element)` finds a dialog either way. Without jQuery `load()` and `url` go through
+`fetch` (`Exp.util.request()`: the same method, fields, `Accept: text/html,*/*`), a button's
+`action(dialog, event)` gets the browser's event, and `scripts: true` runs the content's scripts
+by putting new `<script>` elements in their place (a `src` one loads as the browser loads it,
+where jQuery fetched it at once).
 
-Events (on the `<dialog>` and page-wide): `exp:dialog:open` `{ dialog }`,
-`exp:dialog:close` `{ dialog, value }`. Markup: `data-exp-dialog` with
+Events (on the `<dialog>`, as `CustomEvent`s and with jQuery through it as well, and
+page-wide): `exp:dialog:open` `{ dialog }`, `exp:dialog:close` `{ dialog, value }`. Markup: `data-exp-dialog` with
 `confirm`, `form`, `template` or `url`, and `data-exp-dialog-close` inside a
 dialog. Everything about it: [modules/dialog.md](modules/dialog.md).
 
 `exp::upload`
 -------------
 
-### `$(el).expUpload(options)`
+### `Exp.upload.create(el, options)`, `$(el).expUpload(options)`
 
 Files uploaded one request per file, with progress, Cancel, several at once and
 drop zones. `el` is a container (the chooser, the drop hint and the list are
-built in it) or an `<input type="file">`.
+built in it) or an `<input type="file">`. `Exp.upload.create()` needs no jQuery and returns the
+instance (an element that has one keeps it); `$.fn.expUpload` is there where the page has jQuery
+(`Exp.upload.install(jQuery)` for one loaded later). The requests are the same either way: one
+`XMLHttpRequest` POST per file to `url`, `Accept: */*` (`application/json, text/javascript, */*`
+with `responseType: 'json'`) and the `headers`, a `FormData` of the form's fields (the file in its
+place) or of `data` then the file, the form token added unless `token: false` or the fields have
+one; upload progress, `abort()` on Cancel, the error kinds `signedout`, `refused`, `server`,
+`invalid`, `network`, `timeout`.
 
 Options: `url` (required), `name`, `multiple`, `accept`, `drop`, `maxSize`,
 `data`, `form`, `token`, `auto`, `parallel`, `responseType` (`auto`, `json`,
@@ -390,16 +437,21 @@ Options: `url` (required), `name`, `multiple`, `accept`, `drop`, `maxSize`,
 `onRefuse`, `onStart`, `onProgress`, `onDone(response, file)`,
 `onFail(error, file)`, `onCancel`, `onComplete(summary)`.
 
-The instance (`$(el).expUpload('instance')` or `$(el).data('expUpload')`):
+The instance (`Exp.upload.get(el)`, `$(el).expUpload('instance')` or `$(el).data('expUpload')`):
 `add(files)`, `start()` (a Promise of the summary), `cancel(file | id)` (no
 argument: all), `files()`, `progress()`, `clear()`, `enable()`, `disable()`,
-`destroy()`. `$(el).expUpload('start')` and the like call a method on each
-element.
+`destroy()`; its parts as elements (`el`, `root`, `zone`, `input`, `inputs`, `listElement`,
+`dropZones`) and, with jQuery, in jQuery (`$el`, `$root`, `$input`, `$zone`, `$list`, `$drop`).
+A file (what the callbacks and events get) has `id`, `name`, `size`, `type`, `status`, `percent`,
+`loaded`, `total`, `response`, `error`, and its `row`, `bar`, `statusElement`, `cancelButton`
+(with jQuery also `$row`, `$bar`, `$status`, `$cancel`). `$(el).expUpload('start')` and the like
+call a method on each element.
 
 `Exp.upload.size(bytes)` (`"1.5 kB"`, in the page's language),
 `Exp.upload.accepted(file, accept)`, `Exp.upload.Upload` (the class).
 
-Events (on the element and page-wide), with `{ upload, file, … }`:
+Events (on the element, as `CustomEvent`s and with jQuery through it as well, and page-wide),
+with `{ upload, file, … }`:
 `exp:upload:add`, `:refuse` `{ reason }`, `:start`, `:progress`
 `{ loaded, total, percent, overall }`, `:done` `{ response }`, `:fail`
 `{ error }`, `:cancel`, and `:complete` `{ upload, files, done, failed, canceled }`.
@@ -448,12 +500,15 @@ with the options as JSON. Everything about it:
 `exp::datepicker`
 -----------------
 
-### `$(el).expDatePicker(options)`
+### `Exp.datepicker.create(el, options)`, `$(el).expDatePicker(options)`
 
 A calendar for existing date fields: `fields` (`year`, `month`, `day`, optional
 `hour`, `minute`, selectors inside `el`), `button`, `min` (`'1970-01-01'`),
 `max`, `firstDay` (the siteaccess's). Choosing a day fills the fields without
-leading zeros and an empty time with 12:00.
+leading zeros and an empty time with 12:00. `Exp.datepicker.create()` needs no jQuery and returns
+`{ button, fields }` (elements; `null` without a year field), `Exp.datepicker.get(el)` the same
+later; `$.fn.expDatePicker` is there where the page has jQuery and keeps the fields in jQuery
+(`$(el).data('expDatePicker')`; `Exp.datepicker.install(jQuery)` for a jQuery loaded later).
 
 `Exp.datepicker.open({ fields, anchor, container, min, max, firstDay, onSelect })`
 opens one now and returns `{ close(), element }` (or `null`);
@@ -463,7 +518,10 @@ calendar icon calls.
 
 Events (page-wide): `exp:datepicker:open` `{ fields }`,
 `exp:datepicker:select` `{ date, fields }`, `exp:datepicker:close`
-`{ fields }`. Everything about it: [modules/datepicker.md](modules/datepicker.md).
+`{ fields }`. `fields` are jQuery objects where the page has jQuery and the calendar was opened
+with `open()`, `showDatePicker()` or `$.fn.expDatePicker` (as before), else elements (`null` for
+a missing time). Without jQuery each field filled gets a native `change` event; with jQuery
+`.trigger('change')`, as before. Everything about it: [modules/datepicker.md](modules/datepicker.md).
 
 `exp::autosave`
 ---------------
@@ -484,7 +542,14 @@ The draft's preview in the edit page: `buttonPlace`, `place`, `preview`,
 Methods: `init()`, `loading()`, `setContent(html)`, `error(text)`, `close()`.
 
 Also `Exp.autosave.instances` (by form id) and
-`Exp.autosave.serializeForm(form, ignoreClass)`. Events (page-wide):
+`Exp.autosave.serializeForm(form, ignoreClass)`. Both need no jQuery. Without it the draft is
+posted through `fetch` (`Exp.util.request()`) exactly as `$.ajax()` posted it: `POST` to
+`action`, the form's `FormData` (the extra fields after it, the form token added when the form
+has none), `Accept: text/plain, */*; q=0.01`, `X-Requested-With: XMLHttpRequest`; a save
+replaced by a newer one or cut off by `stop()` is aborted (`abort` only for the second). The
+preview's parts are elements (`linkElement`, `placeElement`, `previewElement`); with jQuery also
+`link`, `place`, `preview` in jQuery, as before. `$.fn.expAutosave` and `$.fn.expPreview` are
+there where the page has jQuery (`Exp.autosave.install(jQuery)` for one loaded later). Events (page-wide):
 `exp:autosave:<event>` with `{ form }` (and `json` for `success` and `error`).
 Everything about it: [modules/autosave.md](modules/autosave.md).
 

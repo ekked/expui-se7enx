@@ -162,10 +162,46 @@ preference callback with `pref` (or keep a `callback` that calls
 `Y.one('#leftmenu').get('clientWidth')` becomes
 `Exp.$('#leftmenu')[0].clientWidth`.
 
+Without jQuery
+--------------
+
+`Exp.collapse(conf)` needs no jQuery: on a page that loads none (`exp::core::shared` without
+`ezjsc::jquery` in front) the configuration, the markup, `aria-expanded`, the keyboard, the
+preference and the event are the same. The styles are set with `Exp.util.css()` and animated with
+`Exp.util.animate()`, by jQuery's rules: a number in `px` where jQuery adds it, the start value
+converted to the end's unit, "swing" over `duration`, `overflow: hidden` while a width or height
+changes, at once with reduced motion; a change while one runs jumps it to its end first, as
+`.stop(true, true)` did.
+
+```html
+{ezscript_require( array( 'exp::core::shared', 'exp::collapse' ) )}
+<script>
+{literal}
+Exp.ready(function () {
+    var c = Exp.collapse({ link: '#mymenu-showhide', collapsed: 0,
+        elements: [{ selector: '#mymenu', duration: 0.4, fullStyle: { width: '201px' }, collapsedStyle: { width: '18px' } }] });
+    Exp.collapse.get('#mymenu-showhide') === c;     // the instance of a link
+    c.links;                                         // the link elements
+});
+{/literal}
+</script>
+```
+
+| | Without jQuery | With jQuery on the page (as before) |
+|---|---|---|
+| the links | `instance.links` (elements) | also `instance.$link` |
+| the instance | `Exp.collapse.get(link)` | also `$(link).data('expCollapse')` |
+| listeners | `addEventListener` | jQuery's (`click.expcollapse`, `keydown.expcollapse`), so `.trigger()` reaches them |
+| styles | `Exp.util.css()`, `Exp.util.animate()` | `.css()`, `.stop(true, true).animate()` |
+| `content` | `innerHTML` | `.html()` |
+| `$.fn.expCollapse` | not there | there (`Exp.collapse.install(jQuery)` puts it on a jQuery loaded later) |
+
+`callback` and the `before*` / `after*` functions run with `this` the instance either way.
+
 Tests
 -----
 
-`design/standard/javascript/exp/test/collapse.test.js`, 8 tests on
+`design/standard/javascript/exp/test/collapse.test.js`, 12 tests on
 `/expui/test`:
 
 - the two styles, at once and animated;
@@ -174,6 +210,8 @@ Tests
 - function values and values set at once;
 - the link content, callbacks and the event;
 - the saved preference;
-- `$.fn.expCollapse`.
+- `$.fn.expCollapse`;
+- without jQuery (`ExpTest.bare()`): the same styles, `aria-expanded`, keyboard, content,
+  callbacks and event; sizes animated over the duration with `overflow: hidden` meanwhile.
 
 The admin menus are also tested by use in the admin, admin2 and admin3 designs.

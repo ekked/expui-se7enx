@@ -61,4 +61,56 @@
         $(window).off('scroll.expsticky');
         window.scrollTo(0, 0);
     });
+
+    // ---- without jQuery (exp::core::shared on a page that loads none) ------------------------------------------
+
+    test('sticky: without jQuery: Exp.sticky.start() fixes and unfixes the toolbar and fades the link', function (t) {
+        var w;
+        return window.ExpTest.bare({ modules: ['sticky'] }).then(function (win) {
+            w = win;
+            var d = w.document;
+            t.equal(w.jQuery, undefined, 'no jQuery in the frame');
+            d.getElementById('sandbox').innerHTML = '<div style="height: 1200px"></div><div id="s-bar" style="height: 40px"></div>'
+                + '<form id="s-form"><input type="text" id="s-field"></form><div id="s-start"></div>'
+                + '<div style="height: 3000px"></div><a href="#" id="s-top">top</a>';
+            w.scrollTo(0, 0);
+            t.equal(w.Exp.sticky.admin().active, false, 'the frame has no edit form');
+            var bar = d.getElementById('s-bar'), top = d.getElementById('s-top');
+            var s = w.Exp.sticky.start(bar, { form: '#s-form', start: '#s-start', toTop: '#s-top', scrollToStart: false, className: 's-fixed', fade: 0 });
+            t.equal(s.active, true);
+            t.equal(w.Exp.sticky.get(bar), s, 'Exp.sticky.get()');
+            t.ok(s.toolbar === bar && s.form === d.getElementById('s-form') && s.toTop === top, 'the parts as elements');
+            t.ok(s.formY > 1000, 'the start is far down the page');
+            t.equal(top.style.opacity, '0', 'the link starts transparent');
+            s.onScroll();
+            t.equal(bar.classList.contains('s-fixed'), false, 'above the start: not fixed');
+            w.scrollTo(0, s.formY + 100);
+            s.onScroll();
+            t.equal(bar.classList.contains('s-fixed'), true, 'below the start: fixed');
+            s.onScroll();
+            return wait(30).then(function () {
+                t.equal(parseFloat(top.style.opacity), 0.85, '"go to the top" shown');
+                w.scrollTo(0, 0);
+                s.onScroll();
+                t.equal(bar.classList.contains('s-fixed'), false, 'unfixed again');
+                return wait(30);
+            }).then(function () {
+                t.equal(top.style.display, 'none', 'and the link hidden');
+            });
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
+
+    test('sticky: without jQuery, scrollToStart scrolls to the start and focuses the first text field', function (t) {
+        var w;
+        return window.ExpTest.bare({ modules: ['sticky'] }).then(function (win) {
+            w = win;
+            var d = w.document;
+            d.getElementById('sandbox').innerHTML = '<div style="height: 900px"></div><div id="s-bar" style="height: 30px"></div>'
+                + '<form id="s-form"><input type="text" id="s-off" disabled><input type="text" id="s-field"></form><div id="s-start"></div><div style="height: 2000px"></div>';
+            w.scrollTo(0, 0);
+            var s = w.Exp.sticky.start('#s-bar', { form: '#s-form', start: '#s-start', toTop: '#s-none', fade: 0 });
+            t.ok(Math.abs((w.scrollY || w.pageYOffset) - (s.formY + 1)) <= 1, 'scrolled to the start');
+            t.equal(d.activeElement && d.activeElement.id, 's-field', 'the first enabled text field has the focus');
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
 }(window, document));

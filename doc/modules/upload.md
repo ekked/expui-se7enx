@@ -246,10 +246,39 @@ location, the new object added to the relation table) is
 `design/admin/javascript/expajaxuploader.js`, `$.fn.expAjaxUploader`, with the
 configuration of the YUI version.
 
+Without jQuery
+--------------
+
+`Exp.upload.create(el, options)` needs no jQuery and returns the instance (an element that has one
+keeps it); `Exp.upload.get(el)` finds it, and `data-exp-upload` starts it from markup on either
+page. The options, the markup, the requests and the callbacks are those of `$.fn.expUpload`:
+
+```js
+var up = Exp.upload.create(document.getElementById('my-upload'), { url: Exp.io.url('myext/upload'), multiple: true, drop: true,
+    onDone: function (response, file) { file.row.classList.add('mine'); } });
+up.el.addEventListener('exp:upload:complete', function (e) { console.log(e.detail.done); });
+```
+
+The requests are byte for byte the same either way (they were never jQuery's): one
+`XMLHttpRequest` POST per file, `Accept: */*` (`application/json, text/javascript, */*` with
+`responseType: 'json'`) and `headers`, the `FormData` of `form` (the file in its place) or of
+`data` followed by the file, the form token added unless `token: false` or the fields carry one;
+progress from `xhr.upload`, `abort()` on Cancel, the same error kinds.
+
+| | Without jQuery | With jQuery on the page (as before) |
+|---|---|---|
+| the parts | `el`, `root`, `zone`, `input`, `inputs`, `listElement`, `dropZones` | also `$el`, `$root`, `$input`, `$zone`, `$list`, `$drop` |
+| a file | `row`, `bar`, `statusElement`, `cancelButton` | also `$row`, `$bar`, `$status`, `$cancel` |
+| the instance | `Exp.upload.get(el)` | also `$(el).data('expUpload')`, `$(el).expUpload('instance')` |
+| listeners | `addEventListener` | jQuery's (`.expupload`), so `.trigger()` reaches them |
+| the events on `el` | `CustomEvent`s, the data in `event.detail` | also through `.trigger()`; each listener hears an event once |
+
+`Exp.upload.install(jQuery)` puts `$.fn.expUpload` on a jQuery loaded later.
+
 Tests
 -----
 
-`design/standard/javascript/exp/test/upload.test.js`, 10 tests on `/expui/test`,
+`design/standard/javascript/exp/test/upload.test.js`, 11 tests on `/expui/test`,
 against `expui/test/echo` (which answers with the fields and files it got):
 
 - `size()` and `accepted()`;
@@ -261,7 +290,9 @@ against `expui/test/echo` (which answers with the fields and files it got):
 - `parallel`; a single-file chooser replacing a waiting file;
 - a server error failing the file with its status; JSON answers parsed;
 - dropped files; nothing while disabled;
-- `data-exp-upload`.
+- `data-exp-upload`;
+- without jQuery (`ExpTest.bare()`): `create()`, one POST per file with the data, the parts and a
+  file's row as elements, the `CustomEvent`s, `destroy()`.
 
 The relation upload and ezmultiupload are also tested by use, as the note at the
 top says.

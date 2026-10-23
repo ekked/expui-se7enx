@@ -87,13 +87,18 @@ extensions that set the same setting, the one listed first in
 Module code is the same in both cases: it uses `Exp.$`.
 
 **No jQuery at all.** `exp::core::shared` on a page that requests no `ezjsc::jquery` brings no
-jQuery: `Exp.$` is `undefined`, and the core, `exp::io` and `exp::datatable` run on plain
-JavaScript with the same API (`fetch` instead of `jQuery.ajax()`, sent the same way;
-`Exp.datatable.create()` instead of `$.fn.expDataTable`). Where jQuery 4 is on the page they run
-on it, exactly as before; `exp::datatable` then binds its listeners through jQuery, so
-`.trigger()` reaches them, and keeps `$.fn.expDataTable` as the jQuery entry point. The other
-modules need jQuery and report it in the console when it is missing
-([API.md](API.md#without-jquery)).
+jQuery: `Exp.$` is `undefined`, and the core, `exp::io` and every module but `exp::compat` run on
+plain JavaScript with the same API (`fetch` instead of `jQuery.ajax()`, sent the same way;
+`Exp.util.css()` and `Exp.util.animate()` instead of `.css()` and `.animate()`, by jQuery's rules
+and timing; `Exp.datatable.create()`, `Exp.upload.create()`, `Exp.datepicker.create()` instead of
+the plugins, `Exp.sticky.start()`, `Exp.collapse()`, `Exp.dialog` and `Exp.autosave` as they
+were). Where jQuery 4 is on the page they run on it, exactly as before: they bind their listeners
+through jQuery, so `.trigger()` reaches them, animate and request through it, keep their parts in
+jQuery as well (`$body`, `$link`, `$row` …) and keep their plugins (`$.fn.expDataTable`,
+`$.fn.expUpload`, `$.fn.expSticky` …) as the jQuery entry points. The events they trigger on an
+element are also `CustomEvent`s; the jQuery that triggered one is told so while it is
+dispatched, so each listener hears it once. `exp::compat` needs jQuery and reports it in the
+console when it is missing ([API.md](API.md#without-jquery)).
 
 ezjscore loads Migrate together with jQuery only from the version whose
 `ezjscServerFunctionsJs::jquery()` adds the `jqueryMigrate` file; an older one
@@ -161,6 +166,8 @@ Server calls
 Writing a module
 ----------------
 
+A module written for jQuery only:
+
 ```js
 (function (window) {
     'use strict';
@@ -188,8 +195,16 @@ for it), its CSS under
 `stylesheets/exp/`, its texts in `[ExpUI] Strings` and the translations, its
 tests (see [TESTING.md](TESTING.md)), its page in `doc/modules/`.
 
-A module that should also run without jQuery is written on the DOM (and `Exp.util`), as
-`exp/datatable.js` is, and offers its jQuery plugin only when `Exp.$` is there.
+A module that should also run without jQuery is written on the DOM (and `Exp.util`), as every
+module but `exp/compat.js` is: an entry point that takes elements (`Exp.my.create(el, options)`,
+`Exp.my.get(el)`), listeners, animations and requests through jQuery when the instance has one and
+natively otherwise, its parts as elements (and in jQuery under `$name` while there is jQuery),
+events on the element fired through jQuery and as a `CustomEvent` (the `fire()` helper of
+`exp/datatable.js`), and an `install(jQuery)` that puts the jQuery plugin on `Exp.$` when the file
+loads and on a jQuery loaded later. Pass a list of elements to jQuery with
+`jQuery.merge(jQuery(), list)`, not `jQuery(list)`: jQuery first checks the list's text
+(`String(list)`) for HTML, and a DOM whose elements print as their markup would have it parsed
+into new elements.
 
 Rules every module keeps: jQuery 4 only (or none); native elements first; works without
 JavaScript where the page did before; started from `data-exp-*`; accessible
