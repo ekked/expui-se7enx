@@ -12,6 +12,11 @@
 
     var Exp = window.Exp;
     if (!Exp || !Exp.io) { return; }
+    if (!Exp.$) {
+        // $.ez() hands back a jqXHR: without jQuery 4 (exp::core::shared on a page that loads none) there is none
+        if (window.console) { window.console.error('Exp: exp::compat needs jQuery 4, and this page has none; request ezjsc::jquery before exp::core::shared'); }
+        return;
+    }
 
     function install(jq) {
         if (!jq || (jq.ez && jq.ez.expCompat)) { return false; }

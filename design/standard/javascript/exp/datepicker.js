@@ -27,7 +27,11 @@
     'use strict';
 
     var Exp = window.Exp;
-    if (!Exp || !Exp.$) { return; }
+    if (!Exp || !Exp.$) {
+        // the core runs without jQuery (exp::core::shared on a page that loads none); this module needs it
+        if (Exp && Exp.ready && window.console) { window.console.error('Exp: exp::datepicker needs jQuery 4, and this page has none; request ezjsc::jquery before exp::core::shared'); }
+        return;
+    }
     var $ = Exp.$;
 
     var open = null;   // the calendar on the page (one at a time)

@@ -79,4 +79,72 @@
         t.equal(Exp.io.url('content/view/full/2'), Exp.config.root + 'content/view/full/2');
         t.equal(Exp.io.url('/content/view/full/2'), Exp.config.root + 'content/view/full/2', 'a leading / is dropped');
     });
+
+    // ---- without jQuery: the same requests through fetch ----------------------------------------------------
+
+    test('io: without jQuery: call (POST, GET), failures, raw, poll and form go through fetch', function (t) {
+        var w, X;
+        return window.ExpTest.bare().then(function (win) {
+            w = win; X = w.Exp;
+            t.equal(X.$, undefined, 'no jQuery');
+            return X.io.call('ezjsc::time');
+        }).then(function (content) {
+            t.ok(String(content) !== '', 'POST: ' + content);
+            return X.io.call('ezjsc::time', [], { method: 'GET' });
+        }).then(function (content) {
+            t.ok(String(content) !== '', 'GET: ' + content);
+            return t.rejects(X.io.call('expnosuchclass::nosuchfunction'), 'server');
+        }).then(function (e) {
+            t.ok(e instanceof X.io.Error && e.message.length > 0, 'an Exp.io.Error with the server\'s text: ' + e.message);
+            return t.rejects(X.io.call('nofunction'), 'invalid');
+        }).then(function () {
+            var c = new w.AbortController(), p = X.io.call('ezjsc::time', [], { signal: c.signal });
+            c.abort();
+            return t.rejects(p, 'network');
+        }).then(function () {
+            var r = X.io.raw('ezjsc::time');
+            t.equal(typeof r.abort, 'function', 'raw(): a Promise with abort()');
+            return r;
+        }).then(function (json) {
+            t.ok(json && 'content' in json, 'raw(): the call view\'s JSON');
+            var ticks = 0;
+            return X.io.poll('ezjsc::time', [], { every: 30, until: function () { return ticks >= 2; }, onTick: function () { ticks++; } })
+                .then(function () { t.equal(ticks, 2, 'poll'); });
+        }).then(function () {
+            var box = w.document.getElementById('sandbox');
+            box.innerHTML = '<form id="bf" method="post" action="' + X.io.url('expui/test/echo') + '">' +
+                '<input name="Title" value="Hello W"><input type="checkbox" name="Flags[]" value="a" checked><input type="checkbox" name="Flags[]" value="b" checked>' +
+                '<button type="submit" name="SaveButton" value="1">Save</button></form>';
+            var f = w.document.getElementById('bf');
+            return X.io.form(f, { submitter: f.querySelector('button') });
+        }).then(function (r) {
+            var json = typeof r === 'string' ? JSON.parse(r) : r;
+            t.equal(json.method, 'POST', 'form: POST');
+            t.equal(json.fields.Title, 'Hello W', 'a field');
+            t.deepEqual(json.fields.Flags, ['a', 'b'], 'a list');
+            t.equal(json.fields.SaveButton, '1', 'the submit button');
+            t.ok(json.token, 'the form token');
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
+
+    test('io: without jQuery: the fields reach the server as jQuery sends them', function (t) {
+        var w;
+        return window.ExpTest.bare().then(function (win) {
+            w = win;
+            var token = ( document.getElementById( Exp.config.tokenElement ) || {} ).title || '';
+            var data = { a: 'x y', plus: 'a+b', text: 'ü&=/?', list: [1, 2], nested: { k: 'v', deep: { n: 3 } }, ezxform_token: token };
+            t.equal(w.Exp.util.param(data), Exp.$.param(data), 'the same field encoding as jQuery.param()');
+            // the same POST through jQuery and through the fetch request: the echo answers with the fields it parsed
+            var url = Exp.io.url('expui/test/echo');
+            return Promise.all([
+                Promise.resolve(Exp.$.ajax({ url: url, method: 'POST', data: data, dataType: 'json' })),
+                w.Exp.util.request({ url: url, method: 'POST', data: data, dataType: 'json' })
+            ]);
+        }).then(function (both) {
+            t.equal(both[1].method, 'POST', 'the fetch request is a POST');
+            t.deepEqual(both[1].fields, both[0].fields, 'the echo got the same fields from both');
+            t.equal(both[1].fields.a, 'x y', 'a space arrives as a space');
+            t.equal(both[1].fields.plus, 'a+b', 'a plus sign arrives as a plus sign');
+        }).finally(function () { window.ExpTest.unbare(w); });
+    });
 }(window, document));

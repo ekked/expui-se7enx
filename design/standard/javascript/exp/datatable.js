@@ -1,13 +1,13 @@
 /*!
  * Exponential UI (expui) datatable — sortable, paged tables with selection, column toggling, inline editing and
- * action menus, on jQuery 4.
+ * action menus, on plain JavaScript (and jQuery 4 when the page has it).
  * GNU General Public License v2.0 (or any later version). https://github.com/se7enxweb/expui
  *
  * Loaded by exp::datatable after exp::core (and exp::io for server functions). The admin tables' data table stack
  * (DataTable, Paginator, TextboxCellEditor, DataSource / XHRDataSource, Button, SimpleDialog, Cookie):
  *
- *   $(el).expDataTable({
- *       columns:  [{ key: 'name', label: 'Name', sortable: true, render: function (row) {}, editable: 'number' }],
+ *   var table = Exp.datatable.create(el, {
+ *       columns:  [{ key: 'name', label: 'Name', sortable: true, render: function (row, td) {}, editable: 'number' }],
  *       source:   { url: function (state) {}, parse: function (json) { return { rows, total }; } }
  *                 | { fn: 'class::function', args: function (state) {}, parse } | { rows: [...] } | { dom: true }
  *                 | function (state) { return Promise.resolve({ rows, total }); },
@@ -21,17 +21,26 @@
  *       filter:   { container: '#filter', delay: 400 },
  *       keyboard: true, empty: 'No records found.', loading: 'Loading...'
  *   });
- *   $(el).data('expDataTable')            the instance: load(), reload(), setPage(), setLimit(), sortBy(), ...
- *   events on the element and through Exp.on(): exp:datatable:load, :sort, :page, :filter, :select, :edit, :invalid, :columns, :options, :error
+ *   Exp.datatable.get(el)                 the instance: load(), reload(), setPage(), setLimit(), sortBy(), ...
+ *   events on the element (CustomEvent, event.detail) and through Exp.on(): exp:datatable:load, :sort, :page,
+ *   :filter, :select, :edit, :invalid, :columns, :options, :error
  *
- * The full reference is doc/modules/datatable.md.
+ * Where jQuery is on the page, $(el).expDataTable(options) does the same as before, byte for byte: its callbacks get
+ * jQuery objects ($td), $(el).data('expDataTable') is the instance, $(el).on('exp:datatable:load', fn(e, data)) hears
+ * the events, and the instance has its jQuery properties ($table, $body, ...). The table's own listeners are then
+ * bound with jQuery, so .trigger() reaches them as it did. The full reference is doc/modules/datatable.md.
  */
 (function (window, document) {
     'use strict';
 
     var Exp = window.Exp;
-    if (!Exp || !Exp.$) { return; }
-    var $ = Exp.$;
+    if (!Exp || !Exp.config || !Exp.util) { return; }
+    if (Exp.datatable && Exp.datatable.create) {
+        // loaded twice (two packs asked for exp::datatable): the first copy stays, with its tables
+        Exp.datatable.install(Exp.$);
+        return;
+    }
+    var extend = Exp.util.extend;
 
     var nextId = 0;
     function uid(prefix) { nextId += 1; return (prefix || 'exp-dt') + '-' + nextId; }
@@ -99,7 +108,175 @@
         if (!e) { return null; }
         if (e === true) { return { type: 'text' }; }
         if (typeof e === 'string') { return { type: e }; }
-        return $.extend({ type: 'text' }, e);
+        return extend({ type: 'text' }, e);
+    }
+
+    // ---- the DOM, the way the jQuery version wrote it --------------------------------------------------------
+    // Each helper does what the jQuery call it stands for did (attr(), addClass(), text(), html(), append() ...), so
+    // the markup is the same attribute for attribute.
+
+    // Table parts are parsed inside the elements they belong in, as jQuery does (its wrapMap)
+    var WRAP = { thead: ['table'], tbody: ['table'], tfoot: ['table'], colgroup: ['table'], caption: ['table'],
+                 col: ['colgroup', 'table'], tr: ['tbody', 'table'], td: ['tr', 'tbody', 'table'], th: ['tr', 'tbody', 'table'] };
+
+    /** The nodes an HTML string stands for. */
+    function parseHtml(html) {
+        var tag = (/<([a-z][^\/\0>\x20\t\r\n\f]*)/i.exec(html) || ['', ''])[1].toLowerCase();
+        var wrap = WRAP[tag] || [], host = document.createElement('div');
+        for (var j = wrap.length - 1; j >= 0; j--) { host = host.appendChild(document.createElement(wrap[j])); }
+        host.innerHTML = html;
+        return Array.prototype.slice.call(host.childNodes).map(function (n) { host.removeChild(n); return n; });
+    }
+
+    /** One element from its HTML: make('<span class="x"></span>'). */
+    function make(html) {
+        return parseHtml(html).filter(function (n) { return n.nodeType === 1; })[0];
+    }
+
+    /** .attr(name, value): undefined changes nothing, null (and false, but for aria-*) removes it. */
+    function attr(el, name, value) {
+        if (value === undefined) { return; }
+        if (value === null || (value === false && name.toLowerCase().indexOf('aria-') !== 0)) { el.removeAttribute(name); return; }
+        el.setAttribute(name, String(value));
+    }
+    function attrs(el, map) { for (var name in map) { attr(el, name, map[name]); } }
+    function classes(value) { return String(value === null || value === undefined ? '' : value).split(/\s+/).filter(Boolean); }
+    function addClass(el, value) { classes(value).forEach(function (c) { el.classList.add(c); }); }
+    function removeClass(el, value) { classes(value).forEach(function (c) { el.classList.remove(c); }); }
+    function toggleClass(el, value, on) { if (on) { addClass(el, value); } else { removeClass(el, value); } }
+    /** .text(value): undefined changes nothing */
+    function setText(el, value) { if (value !== undefined) { el.textContent = value === null ? '' : value; } }
+    /** .html(value): undefined changes nothing */
+    function setHtml(el, value) {
+        if (value === undefined) { return; }
+        if (typeof value === 'string') { el.innerHTML = value; } else { empty(el); append(el, value); }
+    }
+    function empty(el) { el.textContent = ''; return el; }
+    function remove(el) { if (el && el.parentNode) { el.parentNode.removeChild(el); } }
+    function before(el, target) { if (target.parentNode) { target.parentNode.insertBefore(el, target); } }
+
+    /** .append(content...): elements, lists of them (a jQuery object too), HTML, or text. */
+    function append(parent) {
+        for (var i = 1; i < arguments.length; i++) {
+            var x = arguments[i];
+            if (x === null || x === undefined || x === false) { continue; }
+            if (x.nodeType) { parent.appendChild(x); }
+            else if (typeof x === 'string') {
+                if (/<|&#?\w+;/.test(x)) {
+                    parseHtml(x).forEach(function (n) { parent.appendChild(n); });
+                } else {
+                    parent.appendChild(document.createTextNode(x));
+                }
+            } else if (typeof x === 'object' && typeof x.length === 'number') {
+                Array.prototype.slice.call(x).forEach(function (n) { append(parent, n); });
+            } else {
+                parent.appendChild(document.createTextNode(String(x)));
+            }
+        }
+        return parent;
+    }
+
+    function inDocumentOrder(list) {
+        return list.slice().sort(function (a, b) {
+            if (a === b) { return 0; }
+            return a.compareDocumentPosition(b) & 4 ? -1 : 1;
+        });
+    }
+
+    /** $(target).toArray(): a selector, an element, a list of elements (a jQuery object too). */
+    function nodes(target) {
+        if (target === null || target === undefined || target === '') { return []; }
+        if (typeof target === 'string') {
+            if (/^#[\w-]+$/.test(target)) { var one = document.getElementById(target.slice(1)); return one ? [one] : []; }
+            return Array.prototype.slice.call(document.querySelectorAll(target));
+        }
+        if (target.nodeType || target === window) { return [target]; }
+        return typeof target.length === 'number' ? Array.prototype.slice.call(target) : [];
+    }
+    function first(target) { return nodes(target)[0] || null; }
+    /** Elements (one, or a list) in jQuery, without passing a list through jQuery() itself */
+    function wrapIn(jq, x) { return Array.isArray(x) ? jq.merge(jq(), x) : jq(x); }
+    function find(el, selector) { return el ? Array.prototype.slice.call(el.querySelectorAll(selector)) : []; }
+    /** .closest() from any node, a text node too */
+    function closest(node, selector) {
+        var el = node && node.nodeType !== 1 ? node.parentElement : node;
+        return el && el.closest ? el.closest(selector) : null;
+    }
+    function matches(node, selector) { return !!(node && node.nodeType === 1 && node.matches(selector)); }
+    /** jQuery's :visible */
+    function visible(el) { return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length); }
+
+    /**
+     * Binds a listener: with jQuery through it (namespaces included, and .trigger() reaches it), without it as jQuery
+     * would: selector delegates (deepest match first, no clicks of other buttons or on disabled elements), this is
+     * the element, false prevents the default and stops the event. Returns the function that unbinds it.
+     */
+    function listen(jq, target, types, selector, fn) {
+        if (jq) {
+            var $t = wrapIn(jq, nodes(target));
+            $t.on(types, selector || null, fn);
+            return function () { $t.off(types, selector || null, fn); };
+        }
+        var bound = [];
+        var call = function (el, e) {
+            if (fn.call(el, e) === false) { e.preventDefault(); e.stopPropagation(); }
+        };
+        String(types).split(/\s+/).forEach(function (full) {
+            var type = full.split('.')[0];
+            if (!type) { return; }
+            nodes(target).forEach(function (root) {
+                var handler = selector ? function (e) {
+                    if (e.type === 'click' && e.button >= 1) { return; }
+                    for (var cur = e.target; cur && cur !== root; cur = cur.parentNode) {
+                        if (cur.nodeType === 1 && !(e.type === 'click' && cur.disabled === true) && cur.matches(selector)) {
+                            call(cur, e);
+                            if (e.cancelBubble) { break; }
+                        }
+                    }
+                } : function (e) { call(root, e); };
+                root.addEventListener(type, handler);
+                bound.push([root, type, handler]);
+            });
+        });
+        return function () { bound.forEach(function (b) { b[0].removeEventListener(b[1], b[2]); }); };
+    }
+
+    /**
+     * An event on the element: through jQuery when the table has it (handlers get (event, data)), and as a native
+     * CustomEvent (event.detail is the data) for addEventListener(). jQuery's own handlers sit on the same native
+     * events: while the CustomEvent is dispatched they are told it is triggered already (jQuery.event.triggered,
+     * the guard jQuery uses for its own native calls), so they run once, from the jQuery trigger, with the data.
+     * Only the jQuery that triggered is guarded: another jQuery on the page, or any jQuery when the table has none,
+     * gets the native event like any other listener.
+     */
+    function fire(el, name, data, jq) {
+        if (jq) { jq(el).trigger(name, [data]); }
+        var guarded = jq && jq.event ? [jq] : [];
+        var was = guarded.map(function (j) { var w = j.event.triggered; j.event.triggered = name; return w; });
+        try {
+            el.dispatchEvent(new window.CustomEvent(name, { bubbles: true, detail: data }));
+        } finally {
+            guarded.forEach(function (j, i) { j.event.triggered = was[i]; });
+        }
+    }
+
+    // ---- what belongs to which element ------------------------------------------------------------------------
+
+    var tables = new WeakMap(), rowsOf = new WeakMap(), itemsOf = new WeakMap();
+
+    function store(inst, el) {
+        tables.set(el, inst);
+        if (inst.jq) { inst.jq.data(el, 'expDataTable', inst); }
+    }
+    function unstore(inst, el) {
+        tables.delete(el);
+        if (inst.jq) { inst.jq.removeData(el, 'expDataTable'); }
+    }
+    /** The instance set up on el (or on the table inside it), or null. */
+    function get(el) {
+        el = first(el);
+        if (!el) { return null; }
+        return tables.get(el) || (Exp.$ && Exp.$.data(el, 'expDataTable')) || null;
     }
 
     // ---- the menu buttons of the toolbar --------------------------------------------------------------------
@@ -109,26 +286,30 @@
      * type-ahead, Escape and Tab close it.
      */
     function MenuButton(table, def) {
-        var self = this;
+        var self = this, jq = table.jq;
         this.table = table;
         this.def = def;
         this.id = def.id || uid('exp-dt-action');
-        this.$wrap = $('<span class="exp-dt-action"></span>').attr('id', this.id);
-        if (def.className) { this.$wrap.addClass(def.className); }
-        this.$button = $('<button type="button" class="exp-dt-button"></button>').attr('id', this.id + '-button');
-        if (def.html) { this.$button.html(def.label); } else { this.$button.text(def.label || ''); }
-        if (def.title) { this.$button.attr('title', def.title); }
-        this.$wrap.append(this.$button);
-        this.$group = $('<span class="exp-dt-action-group"></span>').append(this.$wrap);
+        this.wrap = make('<span class="exp-dt-action"></span>');
+        attr(this.wrap, 'id', this.id);
+        if (def.className) { addClass(this.wrap, def.className); }
+        this.button = make('<button type="button" class="exp-dt-button"></button>');
+        attr(this.button, 'id', this.id + '-button');
+        if (def.html) { setHtml(this.button, def.label); } else { setText(this.button, def.label || ''); }
+        if (def.title) { attr(this.button, 'title', def.title); }
+        this.wrap.appendChild(this.button);
+        this.group = make('<span class="exp-dt-action-group"></span>');
+        this.group.appendChild(this.wrap);
         this.hasMenu = !!def.menu;
         if (this.hasMenu) {
-            this.$wrap.addClass('exp-dt-menu-button');
-            this.$menu = $('<ul class="exp-dt-menu" role="menu" hidden="hidden"></ul>').attr({ id: this.id + '-menu', 'aria-labelledby': this.id + '-button' });
-            this.$button.attr({ 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': this.id + '-menu' });
-            this.$group.append(this.$menu);
-            this.$menu.on('click', '[role=menuitem]', function (e) { e.preventDefault(); self.choose($(this)); });
-            this.$menu.on('keydown', function (e) { self.menuKey(e); });
-            this.$button.on('keydown', function (e) {
+            addClass(this.wrap, 'exp-dt-menu-button');
+            this.menu = make('<ul class="exp-dt-menu" role="menu" hidden="hidden"></ul>');
+            attrs(this.menu, { id: this.id + '-menu', 'aria-labelledby': this.id + '-button' });
+            attrs(this.button, { 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': this.id + '-menu' });
+            this.group.appendChild(this.menu);
+            listen(jq, this.menu, 'click', '[role=menuitem]', function (e) { e.preventDefault(); self.choose(this); });
+            listen(jq, this.menu, 'keydown', null, function (e) { self.menuKey(e); });
+            listen(jq, this.button, 'keydown', null, function (e) {
                 if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                     e.preventDefault();
                     self.open(e.key === 'ArrowUp' ? 'last' : 'first');
@@ -139,111 +320,123 @@
                 }
             });
         }
-        this.$button.on('click', function (e) {
+        listen(jq, this.button, 'click', null, function (e) {
             e.preventDefault();
             if (self.disabled()) { return; }
             if (self.hasMenu) { if (self.isOpen()) { self.close(); } else { self.open(e.detail === 0 ? 'first' : null); } }
-            else { table.closeMenus(self); if (isFn(def.onClick)) { def.onClick.call(table, table, e); } }
+            else { table.closeMenus(self); if (isFn(def.onClick)) { def.onClick.call(table, table, table.userEvent(e)); } }
         });
         this.setDisabled(!!def.disabled);
     }
-    MenuButton.prototype.disabled = function () { return this.$button.prop('disabled'); };
+    MenuButton.prototype.disabled = function () { return this.button.disabled; };
     MenuButton.prototype.setDisabled = function (on) {
-        this.$button.prop('disabled', !!on);
-        this.$wrap.toggleClass('exp-dt-action-disabled', !!on);
+        this.button.disabled = !!on;
+        toggleClass(this.wrap, 'exp-dt-action-disabled', !!on);
         if (on) { this.close(); }
     };
-    MenuButton.prototype.isOpen = function () { return this.hasMenu && !this.$menu.prop('hidden'); };
+    MenuButton.prototype.isOpen = function () { return this.hasMenu && !this.menu.hidden; };
     MenuButton.prototype.items = function () {
         var m = this.def.menu;
         return (isFn(m) ? m.call(this.table, this.table) : m) || [];
     };
     MenuButton.prototype.render = function () {
-        var $menu = this.$menu.empty(), self = this;
-        var appendItem = function ($list, item) {
-            var $li = $('<li role="none" class="exp-dt-menuitem"></li>');
-            if (item.id) { $li.attr('id', item.id); }
-            var $b = $('<button type="button" role="menuitem" tabindex="-1"></button>');
-            if (item.html) { $b.html(item.label); } else { $b.text(item.label === undefined ? '' : item.label); }
-            if (item.disabled) { $b.attr('aria-disabled', 'true'); $li.addClass('exp-dt-menuitem-disabled'); }
-            $b.data('expItem', item);
-            $list.append($li.append($b));
+        var menu = empty(this.menu), self = this;
+        var appendItem = function (list, item) {
+            var li = make('<li role="none" class="exp-dt-menuitem"></li>');
+            if (item.id) { attr(li, 'id', item.id); }
+            var b = make('<button type="button" role="menuitem" tabindex="-1"></button>');
+            if (item.html) { setHtml(b, item.label); } else { setText(b, item.label === undefined ? '' : item.label); }
+            if (item.disabled) { attr(b, 'aria-disabled', 'true'); addClass(li, 'exp-dt-menuitem-disabled'); }
+            itemsOf.set(b, item);
+            list.appendChild(append(li, b));
         };
         this.items().forEach(function (entry) {
             if (entry && entry.items) {
                 var gid = uid(self.id + '-group');
-                var $g = $('<li role="none" class="exp-dt-menu-groupwrap"></li>');
-                var $list = $('<ul role="group"></ul>').attr('aria-labelledby', gid);
-                $g.append($('<span class="exp-dt-menu-group"></span>').attr('id', gid).text(entry.group || ''), $list);
-                entry.items.forEach(function (item) { appendItem($list, item); });
-                $menu.append($g);
+                var g = make('<li role="none" class="exp-dt-menu-groupwrap"></li>');
+                var list = make('<ul role="group"></ul>');
+                attr(list, 'aria-labelledby', gid);
+                var title = make('<span class="exp-dt-menu-group"></span>');
+                attr(title, 'id', gid);
+                setText(title, entry.group || '');
+                append(g, title, list);
+                entry.items.forEach(function (item) { appendItem(list, item); });
+                menu.appendChild(g);
             } else if (entry) {
-                appendItem($menu, entry);
+                appendItem(menu, entry);
             }
         });
     };
-    MenuButton.prototype.menuItems = function () { return this.$menu.find('[role=menuitem]'); };
+    MenuButton.prototype.menuItems = function () { return find(this.menu, '[role=menuitem]'); };
+    /** The listener on the page that closes the menu on a click outside it. */
+    MenuButton.prototype.unlistenPage = function () {
+        if (this.offPage) { this.offPage(); this.offPage = null; }
+        if (this.table.jq) { this.table.jq(document).off('mousedown.expdtmenu' + this.id); }
+    };
     MenuButton.prototype.open = function (focus) {
         if (!this.hasMenu || this.disabled()) { return; }
         this.table.closeMenus(this);
         this.render();
-        this.$menu.prop('hidden', false);
-        this.$button.attr('aria-expanded', 'true');
-        this.$wrap.addClass('exp-dt-menu-open');
+        this.menu.hidden = false;
+        attr(this.button, 'aria-expanded', 'true');
+        addClass(this.wrap, 'exp-dt-menu-open');
         var items = this.menuItems();
         if (items.length) {
-            var target = focus === 'last' ? items.last() : items.first();
-            items.attr('tabindex', '-1');
-            target.attr('tabindex', '0');
-            if (focus) { target[0].focus(); }
+            var target = focus === 'last' ? items[items.length - 1] : items[0];
+            items.forEach(function (i) { i.setAttribute('tabindex', '-1'); });
+            target.setAttribute('tabindex', '0');
+            if (focus) { target.focus(); }
         }
         var self = this;
-        $(document).off('mousedown.expdtmenu' + this.id).on('mousedown.expdtmenu' + this.id, function (e) {
-            if (!self.$group[0].contains(e.target)) { self.close(); }
+        this.unlistenPage();
+        this.offPage = listen(this.table.jq, document, 'mousedown.expdtmenu' + this.id, null, function (e) {
+            if (!self.group.contains(e.target)) { self.close(); }
         });
         if (isFn(this.def.onOpen)) { this.def.onOpen.call(this.table, this.table); }
     };
     MenuButton.prototype.close = function (focusButton) {
-        if (!this.hasMenu || this.$menu.prop('hidden')) { return; }
-        this.$menu.prop('hidden', true);
-        this.$button.attr('aria-expanded', 'false');
-        this.$wrap.removeClass('exp-dt-menu-open');
-        $(document).off('mousedown.expdtmenu' + this.id);
-        if (focusButton) { this.$button[0].focus(); }
+        if (!this.hasMenu || this.menu.hidden) { return; }
+        this.menu.hidden = true;
+        attr(this.button, 'aria-expanded', 'false');
+        removeClass(this.wrap, 'exp-dt-menu-open');
+        this.unlistenPage();
+        if (focusButton) { this.button.focus(); }
     };
-    MenuButton.prototype.choose = function ($b) {
-        var item = $b.data('expItem');
+    /** b: the menu item's button (with jQuery: the button or the button in jQuery) */
+    MenuButton.prototype.choose = function (b) {
+        var item = itemsOf.get(b && b.jquery ? b[0] : b);
         if (!item || item.disabled) { return; }
         this.close(true);
         var handler = isFn(item.onSelect) ? item.onSelect : this.def.onSelect;
         if (isFn(handler)) { handler.call(this.table, item, this.table); }
     };
     MenuButton.prototype.menuKey = function (e) {
-        var items = this.menuItems(), i = items.index(document.activeElement), next = null;
+        var items = this.menuItems(), i = items.indexOf(document.activeElement), next = null, n = items.length;
         switch (e.key) {
-        case 'ArrowDown': next = items.eq((i + 1) % items.length); break;
-        case 'ArrowUp': next = items.eq((i - 1 + items.length) % items.length); break;
-        case 'Home': next = items.first(); break;
-        case 'End': next = items.last(); break;
+        case 'ArrowDown': next = items[(i + 1) % n]; break;
+        case 'ArrowUp': next = items[(i - 1 + n) % n]; break;
+        case 'Home': next = items[0]; break;
+        case 'End': next = items[n - 1]; break;
         case 'Escape': e.preventDefault(); e.stopPropagation(); this.close(true); return;
         case 'Tab': this.close(); return;
         case 'Enter':
         case ' ':
-            if (i !== -1) { e.preventDefault(); this.choose(items.eq(i)); }
+            if (i !== -1) { e.preventDefault(); this.choose(items[i]); }
             return;
         default:
             if (e.key && e.key.length === 1 && /\S/.test(e.key)) {
-                var key = e.key.toLowerCase(), n = items.length;
+                var key = e.key.toLowerCase();
                 for (var k = 1; k <= n; k++) {
-                    var cand = items.eq((i + k) % n);
-                    if (cand.text().replace(/^\s+/, '').charAt(0).toLowerCase() === key) { next = cand; break; }
+                    var cand = items[(i + k) % n];
+                    if (cand.textContent.replace(/^\s+/, '').charAt(0).toLowerCase() === key) { next = cand; break; }
                 }
             }
         }
-        if (next && next.length) {
+        if (next) {
             e.preventDefault();
-            items.attr('tabindex', '-1');
-            next.attr('tabindex', '0')[0].focus();
+            items.forEach(function (x) { x.setAttribute('tabindex', '-1'); });
+            next.setAttribute('tabindex', '0');
+            next.focus();
         }
     };
 
@@ -273,10 +466,22 @@
         onRender: null
     };
 
-    function DataTable($el, options) {
-        this.$el = $el;
-        this.el = $el[0];
-        this.o = $.extend({}, DEFAULTS, options || {});
+    /**
+     * new DataTable(el, options): el, the element to build the table in, or a <table> to enhance. A jQuery object
+     * instead of el sets the table up as $(el).expDataTable(options) does (callbacks get jQuery objects).
+     * how (internal): { jq: the jQuery to bind the listeners with (Exp.$ by default, null: none), wrapped: callbacks
+     * get jQuery objects }.
+     */
+    function DataTable(el, options, how) {
+        how = how || {};
+        if (el && el.jquery) {
+            how = { jq: how.jq || el.constructor, wrapped: true };
+            el = el[0];
+        }
+        this.jq = how.jq !== undefined ? how.jq || null : (Exp.$ || null);
+        this.wrapped = !!(how.wrapped && this.jq);
+        this.el = el;
+        this.o = extend({}, DEFAULTS, options || {});
         this.id = this.el.id || uid();
         this.cache = {};
         this.cacheOrder = [];
@@ -284,16 +489,26 @@
         this.rowsData = [];
         this.total = 0;
         this.menus = [];
+        this.pagers = [];
+        this.compacts = [];
         this.lastChecked = null;
         this.editing = null;
         this.init();
     }
 
+    /** An element for a callback: in jQuery when the table was set up through $.fn.expDataTable, else the element. */
+    DataTable.prototype.wrap = function (el) { return this.wrapped ? wrapIn(this.jq, el) : el; };
+    /** An event for a callback: jQuery's event through $.fn.expDataTable, else the browser's. */
+    DataTable.prototype.userEvent = function (e) { return this.wrapped ? e : (e && e.originalEvent) || e; };
+    /** The row (the source's object) a <tr> of the table shows, or undefined. */
+    DataTable.prototype.rowData = function (tr) { return tr ? rowsOf.get(tr.jquery ? tr[0] : tr) : undefined; };
+    DataTable.prototype.listen = function (target, types, selector, fn) { return listen(this.jq, target, types, selector, fn); };
+
     DataTable.prototype.init = function () {
         var o = this.o, self = this;
-        var p = this.paging = $.extend({ limit: 25, offset: 0, pageLinks: 10, containers: null, compact: null, alwaysVisible: true,
-                                         labels: {} }, o.paging === false ? { off: true } : o.paging || {});
-        p.labels = $.extend({ first: '&laquo;', prev: '&lsaquo;', next: '&rsaquo;', last: '&raquo;' }, p.labels);
+        var p = this.paging = extend({ limit: 25, offset: 0, pageLinks: 10, containers: null, compact: null, alwaysVisible: true,
+                                       labels: {} }, o.paging === false ? { off: true } : o.paging || {});
+        p.labels = extend({ first: '&laquo;', prev: '&lsaquo;', next: '&rsaquo;', last: '&raquo;' }, p.labels);
         this.texts = {
             empty: o.empty !== null ? o.empty : t('No records found.'),
             loading: o.loading !== null ? o.loading : t('Loading...'),
@@ -302,22 +517,30 @@
 
         // the table: the element itself when it is one (its header and rows give the columns and data), else built
         if (this.el.tagName === 'TABLE') {
-            this.$table = this.$el;
-            this.$root = $('<div class="exp-dt"></div>').insertBefore(this.$table).append(this.$table);
+            this.table = this.el;
+            this.root = make('<div class="exp-dt"></div>');
+            before(this.root, this.table);
+            this.root.appendChild(this.table);
             if (!o.columns) { o.columns = this.columnsFromMarkup(); }
             if (!o.source) { o.source = { dom: true }; }
         } else {
-            this.$root = this.$el.addClass('exp-dt').empty();
-            this.$table = $('<table></table>').appendTo(this.$root);
+            this.root = this.el;
+            addClass(this.root, 'exp-dt');
+            empty(this.root);
+            this.table = make('<table></table>');
+            this.root.appendChild(this.table);
         }
-        this.$table.addClass('exp-dt-table').addClass(o.tableClass || '');
+        addClass(this.table, 'exp-dt-table');
+        addClass(this.table, o.tableClass || '');
         // a table wider than its column scrolls inside it instead of running over the next column
-        this.$scroll = $('<div class="exp-dt-scroll"></div>').insertBefore(this.$table).append(this.$table);
-        this.columns = (o.columns || []).map(function (c) { return $.extend({ sortable: false, hidden: false }, c); });
+        this.scroller = make('<div class="exp-dt-scroll"></div>');
+        before(this.scroller, this.table);
+        this.scroller.appendChild(this.table);
+        this.columns = (o.columns || []).map(function (c) { return extend({ sortable: false, hidden: false }, c); });
 
         // the selection column
-        var sel = this.select = o.select ? $.extend({ key: 'select', name: '', className: 'exp-dt-check', value: null,
-                                                         label: null, header: true, ranges: true }, o.select === 'checkbox' || o.select === true ? {} : o.select) : null;
+        var sel = this.select = o.select ? extend({ key: 'select', name: '', className: 'exp-dt-check', value: null,
+                                                    label: null, header: true, ranges: true }, o.select === 'checkbox' || o.select === true ? {} : o.select) : null;
         if (sel && !this.column(sel.key)) { this.columns.unshift({ key: sel.key, label: '', sortable: false }); }
         // the order the columns were defined in: Table options lists them so, whatever order they are shown in
         this.defOrder = this.columns.slice();
@@ -342,37 +565,44 @@
         if (p.offset) { this.state.offset = Number(p.offset) || 0; }
 
         this.buildHead();
-        this.$message = $('<tbody class="exp-dt-message" hidden="hidden"><tr><td></td></tr></tbody>').appendTo(this.$table);
-        this.$body = $('<tbody class="exp-dt-body"></tbody>').appendTo(this.$table);
-        if (this.domRows) { this.$body.append(this.domRows.map(function (r) { return r._tr; })); }
-        if (o.caption) { this.$table.prepend($('<caption class="exp-visually-hidden"></caption>').text(o.caption)); }
-        this.$status = $('<div class="exp-visually-hidden" role="status" aria-live="polite"></div>').appendTo(this.$root);
+        this.message = make('<tbody class="exp-dt-message" hidden="hidden"><tr><td></td></tr></tbody>');
+        this.table.appendChild(this.message);
+        this.body = make('<tbody class="exp-dt-body"></tbody>');
+        this.table.appendChild(this.body);
+        if (this.domRows) { append(this.body, this.domRows.map(function (r) { return r._tr; })); }
+        if (o.caption) {
+            var caption = make('<caption class="exp-visually-hidden"></caption>');
+            setText(caption, o.caption);
+            this.table.insertBefore(caption, this.table.firstChild);
+        }
+        this.status = make('<div class="exp-visually-hidden" role="status" aria-live="polite"></div>');
+        this.root.appendChild(this.status);
 
         this.buildPagers();
         this.buildActions();
         this.buildFilter();
         this.bind();
-        this.$el.data('expDataTable', this);
-        if (this.$table[0] !== this.el) { this.$table.data('expDataTable', this); }
+        store(this, this.el);
+        if (this.table !== this.el) { store(this, this.table); }
         if (o.initialLoad !== false) { this.load(); }
     };
 
     DataTable.prototype.columnsFromMarkup = function () {
-        var cols = [], self = this;
-        this.$table.find('thead th').each(function (i) {
-            var key = this.getAttribute('data-key') || ('c' + i);
-            cols.push({ key: key, label: trim($(this).text()), html: this.innerHTML,
-                        sortable: this.hasAttribute('data-sortable') || $(this).hasClass('exp-dt-sortable') });
+        var cols = [];
+        find(this.table, 'thead th').forEach(function (th, i) {
+            var key = th.getAttribute('data-key') || ('c' + i);
+            cols.push({ key: key, label: trim(th.textContent), html: th.innerHTML,
+                        sortable: th.hasAttribute('data-sortable') || th.classList.contains('exp-dt-sortable') });
         });
         var keys = cols.map(function (c) { return c.key; });
-        this.domRows = this.$table.find('tbody tr').toArray().map(function (tr) {
+        this.domRows = find(this.table, 'tbody tr').map(function (tr) {
             var row = { _tr: tr };
-            $(tr).children('td, th').each(function (i) {
-                row[keys[i]] = this.hasAttribute('data-value') ? this.getAttribute('data-value') : trim($(this).text());
+            Array.prototype.filter.call(tr.children, function (c) { return matches(c, 'td, th'); }).forEach(function (cell, i) {
+                row[keys[i]] = cell.hasAttribute('data-value') ? cell.getAttribute('data-value') : trim(cell.textContent);
             });
             return row;
         });
-        this.$table.find('thead, tbody').remove();
+        find(this.table, 'thead, tbody').forEach(remove);
         return cols;
     };
 
@@ -403,44 +633,55 @@
     function alignClass(c) { return c.align === 'right' || c.align === 'center' ? ' exp-dt-align-' + c.align : ''; }
 
     DataTable.prototype.buildHead = function () {
-        var self = this, $tr = $('<tr></tr>');
+        var self = this, tr = make('<tr></tr>');
         this.columns.forEach(function (c) {
-            var $th = $('<th scope="col"></th>').attr('data-key', c.key).addClass('exp-dt-col-' + c.key + alignClass(c));
-            if (c.className) { $th.addClass(c.className); }
-            if (c.headerClassName) { $th.addClass(c.headerClassName); }
-            if (c.title) { $th.attr('title', c.title); }
+            var th = make('<th scope="col"></th>');
+            attr(th, 'data-key', c.key);
+            addClass(th, 'exp-dt-col-' + c.key + alignClass(c));
+            if (c.className) { addClass(th, c.className); }
+            if (c.headerClassName) { addClass(th, c.headerClassName); }
+            if (c.title) { attr(th, 'title', c.title); }
             if (self.select && c.key === self.select.key) {
-                $th.addClass('exp-dt-col-select');
+                addClass(th, 'exp-dt-col-select');
                 if (self.select.header) {
-                    self.$all = $('<input type="checkbox" class="exp-dt-check-all" />').attr('aria-label', t('Select all'));
-                    $th.append(self.$all);
+                    self.checkAll = make('<input type="checkbox" class="exp-dt-check-all" />');
+                    attr(self.checkAll, 'aria-label', t('Select all'));
+                    th.appendChild(self.checkAll);
                 }
             } else if (c.sortable) {
-                $th.addClass('exp-dt-sortable').attr('aria-sort', 'none');
-                var $b = $('<button type="button" class="exp-dt-sort"></button>');
-                if (c.html && !c.label) { $b.html(c.html); } else { $b.text(c.label || ''); }
-                $th.append($b);
+                addClass(th, 'exp-dt-sortable');
+                attr(th, 'aria-sort', 'none');
+                var b = make('<button type="button" class="exp-dt-sort"></button>');
+                if (c.html && !c.label) { setHtml(b, c.html); } else { setText(b, c.label || ''); }
+                th.appendChild(b);
             } else if (c.label) {
-                $th.append($('<span class="exp-dt-label"></span>').toggleClass('exp-visually-hidden', !!c.labelHidden).text(c.label));
+                var label = make('<span class="exp-dt-label"></span>');
+                toggleClass(label, 'exp-visually-hidden', !!c.labelHidden);
+                setText(label, c.label);
+                th.appendChild(label);
             }
-            if (c.hidden) { $th.prop('hidden', true); }
-            $tr.append($th);
+            if (c.hidden) { th.hidden = true; }
+            tr.appendChild(th);
         });
-        var $head = $('<thead></thead>').append($tr);
-        if (this.$head) { this.$head.replaceWith($head); } else { $head.appendTo(this.$table); }
-        this.$head = $head;
+        var head = make('<thead></thead>');
+        head.appendChild(tr);
+        if (this.head) { if (this.head.parentNode) { this.head.parentNode.replaceChild(head, this.head); } } else { this.table.appendChild(head); }
+        this.head = head;
         this.updateSortHeads();
     };
 
     DataTable.prototype.updateSortHeads = function () {
         var s = this.state.sort;
-        this.$head.find('th.exp-dt-sortable').each(function () {
-            var key = this.getAttribute('data-key'), on = s && s.key === key;
+        find(this.head, 'th.exp-dt-sortable').forEach(function (th) {
+            var key = th.getAttribute('data-key'), on = s && s.key === key;
             var dir = on ? s.dir : null;
-            this.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none');
-            $(this).toggleClass('exp-dt-asc', dir === 'asc').toggleClass('exp-dt-desc', dir === 'desc');
+            th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none');
+            toggleClass(th, 'exp-dt-asc', dir === 'asc');
+            toggleClass(th, 'exp-dt-desc', dir === 'desc');
             // what a click does next: the opposite direction when sorted by it, else ascending
-            $(this).find('button.exp-dt-sort').attr('title', dir === 'asc' ? t('Click to sort descending') : t('Click to sort ascending'));
+            find(th, 'button.exp-dt-sort').forEach(function (b) {
+                attr(b, 'title', dir === 'asc' ? t('Click to sort descending') : t('Click to sort ascending'));
+            });
         });
     };
 
@@ -448,26 +689,39 @@
 
     DataTable.prototype.buildPagers = function () {
         var p = this.paging, self = this;
-        this.$pagers = $();
-        this.$compacts = $();
+        this.pagers = [];
+        this.compacts = [];
         if (p.off) { return; }
-        var full = p.containers ? $.map([].concat(p.containers), function (c) { return $(c).toArray(); }) : null;
-        if (!full) { full = [$('<div class="exp-dt-pager-wrap"></div>').appendTo(this.$root)[0]]; }
+        var flat = function (list) { return [].concat.apply([], [].concat(list || []).map(nodes)); };
+        var full = p.containers ? flat(p.containers) : null;
+        if (!full) {
+            var wrap = make('<div class="exp-dt-pager-wrap"></div>');
+            this.root.appendChild(wrap);
+            full = [wrap];
+        }
         full.forEach(function (c) {
-            self.$pagers = self.$pagers.add($('<nav class="exp-dt-pager"></nav>').attr('aria-label', t('Pages')).appendTo($(c).empty()));
+            var nav = make('<nav class="exp-dt-pager"></nav>');
+            attr(nav, 'aria-label', t('Pages'));
+            empty(c).appendChild(nav);
+            self.pagers.push(nav);
         });
-        $.map([].concat(p.compact || []), function (c) { return $(c).toArray(); }).forEach(function (c) {
-            self.$compacts = self.$compacts.add($('<nav class="exp-dt-pager exp-dt-pager-compact"></nav>').attr('aria-label', t('Pages')).appendTo($(c).empty()));
+        flat(p.compact).forEach(function (c) {
+            var nav = make('<nav class="exp-dt-pager exp-dt-pager-compact"></nav>');
+            attr(nav, 'aria-label', t('Pages'));
+            empty(c).appendChild(nav);
+            self.compacts.push(nav);
         });
-        this.$pagers.add(this.$compacts).on('click', 'button', function (e) {
+        this.pagers = inDocumentOrder(this.pagers);
+        this.compacts = inDocumentOrder(this.compacts);
+        this.listen(this.pagers.concat(this.compacts), 'click', 'button', function (e) {
             e.preventDefault();
-            var b = $(this), page = self.page(), pages = self.pages();
-            if (b.prop('disabled')) { return; }
-            if (b.hasClass('exp-dt-first')) { self.setPage(1); }
-            else if (b.hasClass('exp-dt-prev')) { self.setPage(page - 1); }
-            else if (b.hasClass('exp-dt-next')) { self.setPage(page + 1); }
-            else if (b.hasClass('exp-dt-last')) { self.setPage(pages); }
-            else if (b.hasClass('exp-dt-page')) { self.setPage(Number(b.attr('data-page'))); }
+            var b = this, page = self.page(), pages = self.pages();
+            if (b.disabled) { return; }
+            if (b.classList.contains('exp-dt-first')) { self.setPage(1); }
+            else if (b.classList.contains('exp-dt-prev')) { self.setPage(page - 1); }
+            else if (b.classList.contains('exp-dt-next')) { self.setPage(page + 1); }
+            else if (b.classList.contains('exp-dt-last')) { self.setPage(pages); }
+            else if (b.classList.contains('exp-dt-page')) { self.setPage(Number(b.getAttribute('data-page'))); }
         });
     };
 
@@ -482,54 +736,75 @@
         if (this.paging.off) { return; }
         var p = this.paging, page = this.total ? this.page() : 0, pages = this.pages(), L = p.labels;
         var btn = function (cls, html, label, disabled) {
-            return $('<button type="button"></button>').addClass(cls).html(html).attr('aria-label', label).prop('disabled', !!disabled);
+            var b = make('<button type="button"></button>');
+            addClass(b, cls);
+            setHtml(b, html);
+            attr(b, 'aria-label', label);
+            b.disabled = !!disabled;
+            return b;
         };
-        var first = page <= 1, last = page >= pages;
-        this.$pagers.each(function () {
-            var $nav = $(this).empty();
-            var $pages = $('<span class="exp-dt-pages"></span>');
+        var isFirst = page <= 1, isLast = page >= pages;
+        this.pagers.forEach(function (nav) {
+            empty(nav);
+            var list = make('<span class="exp-dt-pages"></span>');
             var r = pageRange(page, pages, p.pageLinks);
             for (var i = r[0]; i <= r[1]; i++) {
+                var item;
                 if (i === page) {
-                    $pages.append($('<span class="exp-dt-page exp-dt-current" aria-current="page"></span>').attr('data-page', i).text(i));
+                    item = make('<span class="exp-dt-page exp-dt-current" aria-current="page"></span>');
+                    attr(item, 'data-page', i);
                 } else {
-                    $pages.append($('<button type="button" class="exp-dt-page"></button>').attr({ 'data-page': i, 'aria-label': t('Page %page', { '%page': i }) }).text(i));
+                    item = make('<button type="button" class="exp-dt-page"></button>');
+                    attrs(item, { 'data-page': i, 'aria-label': t('Page %page', { '%page': i }) });
                 }
+                setText(item, i);
+                list.appendChild(item);
             }
-            $nav.append($('<span class="exp-dt-backward"></span>').append(btn('exp-dt-first', L.first, t('First page'), first), btn('exp-dt-prev', L.prev, t('Previous page'), first)),
-                        $pages,
-                        $('<span class="exp-dt-forward"></span>').append(btn('exp-dt-next', L.next, t('Next page'), last), btn('exp-dt-last', L.last, t('Last page'), last)));
+            append(nav, append(make('<span class="exp-dt-backward"></span>'), btn('exp-dt-first', L.first, t('First page'), isFirst), btn('exp-dt-prev', L.prev, t('Previous page'), isFirst)),
+                   list,
+                   append(make('<span class="exp-dt-forward"></span>'), btn('exp-dt-next', L.next, t('Next page'), isLast), btn('exp-dt-last', L.last, t('Last page'), isLast)));
         });
-        this.$compacts.each(function () {
-            $(this).empty().append(btn('exp-dt-prev', L.prev, t('Previous page'), first), btn('exp-dt-next', L.next, t('Next page'), last));
+        this.compacts.forEach(function (nav) {
+            append(empty(nav), btn('exp-dt-prev', L.prev, t('Previous page'), isFirst), btn('exp-dt-next', L.next, t('Next page'), isLast));
         });
         // alwaysVisible: false hides the pagers while everything fits on one page, as the classic paginator did
-        this.$pagers.add(this.$compacts).prop('hidden', !p.alwaysVisible && pages <= 1);
+        this.pagers.concat(this.compacts).forEach(function (nav) { nav.hidden = !p.alwaysVisible && pages <= 1; });
     };
 
     // ---- toolbar, Table options, filter ------------------------------------------------------------------
 
-    DataTable.prototype.toolbar = function () {
-        if (!this.$toolbar) {
-            this.$toolbar = this.o.actionsContainer ? $(this.o.actionsContainer).first() : $('<div class="exp-dt-toolbar"></div>').prependTo(this.$root);
-            this.$toolbar.addClass('exp-dt-actions').attr('role', this.$toolbar.attr('role') || 'toolbar');
-            if (!this.$toolbar.attr('aria-label')) { this.$toolbar.attr('aria-label', t('Table actions')); }
+    /** The toolbar element (actionsContainer, or one made at the top of the table); null when actionsContainer is not on the page. */
+    DataTable.prototype.toolbarNode = function () {
+        if (this.toolbarElement === undefined) {
+            var bar = this.o.actionsContainer ? first(this.o.actionsContainer) : null;
+            if (!this.o.actionsContainer) {
+                bar = make('<div class="exp-dt-toolbar"></div>');
+                this.root.insertBefore(bar, this.root.firstChild);
+            }
+            if (bar) {
+                addClass(bar, 'exp-dt-actions');
+                attr(bar, 'role', bar.getAttribute('role') || 'toolbar');
+                if (!bar.getAttribute('aria-label')) { attr(bar, 'aria-label', t('Table actions')); }
+            }
+            this.toolbarElement = bar;
         }
-        return this.$toolbar;
+        return this.toolbarElement;
     };
+    /** The toolbar: the element (in jQuery through $.fn.expDataTable). */
+    DataTable.prototype.toolbar = function () { return this.wrap(this.toolbarNode()); };
 
     DataTable.prototype.buildActions = function () {
         var self = this, defs = (this.o.actions || []).slice();
         var to = this.o.tableOptions;
         if (to) {
-            defs.push($.extend({ id: 'exp-dt-options', label: t('Table options') }, to.button || {}, { menu: null, onClick: function () { self.openOptions(); } }));
+            defs.push(extend({ id: 'exp-dt-options', label: t('Table options') }, to.button || {}, { menu: null, onClick: function () { self.openOptions(); } }));
         }
         if (!defs.length) { return; }
-        var $bar = this.toolbar();
+        var bar = this.toolbarNode();
         defs.forEach(function (d) {
             var m = new MenuButton(self, d);
             self.menus.push(m);
-            $bar.append(m.$group, ' ');
+            if (bar) { append(bar, m.group, ' '); }
         });
     };
 
@@ -545,179 +820,225 @@
     DataTable.prototype.buildFilter = function () {
         var f = this.o.filter, self = this;
         if (!f) { return; }
-        f = this.filterConf = $.extend({ input: null, container: null, delay: 400, attrs: {} }, f === true ? {} : f);
-        var $in = f.input ? $(f.input).first() : $();
-        if (!$in.length) {
-            $in = $('<input type="text" />').attr($.extend({ 'aria-label': t('Filter') }, f.attrs));
-            (f.container ? $(f.container).first() : this.toolbar()).append($in);
-        } else if (!$in.attr('aria-label') && !$in.attr('id')) {
-            $in.attr('aria-label', t('Filter'));
+        f = this.filterConf = extend({ input: null, container: null, delay: 400, attrs: {} }, f === true ? {} : f);
+        var input = f.input ? first(f.input) : null;
+        if (!input) {
+            input = make('<input type="text" />');
+            attrs(input, extend({ 'aria-label': t('Filter') }, f.attrs));
+            var host = f.container ? first(f.container) : this.toolbarNode();
+            if (host) { host.appendChild(input); }
+        } else if (!input.getAttribute('aria-label') && !input.getAttribute('id')) {
+            attr(input, 'aria-label', t('Filter'));
         }
-        this.$filter = $in;
+        this.filterInput = input;
         var timer = null;
-        $in.on('input.expdt', function () {
+        this.offFilter = this.listen(input, 'input.expdt', null, function () {
             if (timer) { window.clearTimeout(timer); }
-            timer = window.setTimeout(function () { timer = null; self.setFilter($in.val()); }, f.delay);
+            timer = window.setTimeout(function () { timer = null; self.setFilter(input.value); }, f.delay);
         });
     };
 
     /** Table options: rows per page (and a custom number), and the visible columns. A native modal <dialog>. */
     DataTable.prototype.buildOptions = function () {
         var self = this, to = this.o.tableOptions, ids = uid('exp-dt-options');
-        var $d = $('<dialog class="exp-dt-dialog"></dialog>').attr('aria-labelledby', ids + '-title');
-        $d.append($('<h2 class="exp-dt-dialog-title"></h2>').attr('id', ids + '-title').text(to.title || t('Table options')));
-        var $bd = $('<div class="exp-dt-dialog-body"></div>').appendTo($d);
+        var d = make('<dialog class="exp-dt-dialog"></dialog>');
+        attr(d, 'aria-labelledby', ids + '-title');
+        var title = make('<h2 class="exp-dt-dialog-title"></h2>');
+        attr(title, 'id', ids + '-title');
+        setText(title, to.title || t('Table options'));
+        d.appendChild(title);
+        var bd = make('<div class="exp-dt-dialog-body"></div>');
+        d.appendChild(bd);
         var lim = to.limits;
         if (lim) {
-            var $fs = $('<fieldset></fieldset>').append($('<legend></legend>').text(lim.legend || t('Number of items per page:')));
-            var $block = $('<div class="block"></div>').appendTo($fs);
+            var legend = make('<legend></legend>');
+            setText(legend, lim.legend || t('Number of items per page:'));
+            var fs = append(make('<fieldset></fieldset>'), legend);
+            var block = make('<div class="block"></div>');
+            fs.appendChild(block);
             (lim.items || []).forEach(function (item) {
-                var $r = $('<input type="radio" name="TableOptionValue" />').attr({ id: 'table-option-row-btn-' + item.id, value: item.count })
-                    .prop('checked', Number(self.state.limit) === Number(item.count));
-                $r.on('click', function () {
+                var r = make('<input type="radio" name="TableOptionValue" />');
+                attrs(r, { id: 'table-option-row-btn-' + item.id, value: item.count });
+                r.checked = Number(self.state.limit) === Number(item.count);
+                self.listen(r, 'click', null, function () {
                     self.setLimit(item.count);
                     if (isFn(lim.onSelect)) { lim.onSelect.call(self, item, self); }
                 });
-                $block.append($('<div class="table-options-row"></div>').append(
-                    $('<span class="table-options-key"></span>').append($('<label></label>').attr('for', 'table-option-row-btn-' + item.id).text(item.count)),
-                    $('<span class="table-options-value"></span>').append($r)));
+                var label = make('<label></label>');
+                attr(label, 'for', 'table-option-row-btn-' + item.id);
+                setText(label, item.count);
+                block.appendChild(append(make('<div class="table-options-row"></div>'),
+                    append(make('<span class="table-options-key"></span>'), label),
+                    append(make('<span class="table-options-value"></span>'), r)));
             });
             if (lim.custom) {
-                var c = $.extend({ label: t('Custom'), placeholder: '', max: 10000, invalid: null }, lim.custom);
-                var $ci = $('<input id="table-option-custom-input" type="text" name="TableOptionCustomValue" value="" class="table-options-custom-input" />').attr('placeholder', c.placeholder);
-                var $cr = $('<input id="table-option-custom-radio" type="radio" name="TableOptionValue" value="custom" />').attr('aria-label', c.label);
+                var c = extend({ label: t('Custom'), placeholder: '', max: 10000, invalid: null }, lim.custom);
+                var ci = make('<input id="table-option-custom-input" type="text" name="TableOptionCustomValue" value="" class="table-options-custom-input" />');
+                attr(ci, 'placeholder', c.placeholder);
+                var cr = make('<input id="table-option-custom-radio" type="radio" name="TableOptionValue" value="custom" />');
+                attr(cr, 'aria-label', c.label);
                 var valid = function (v) { var n = parseInt(v, 10); return !isNaN(n) && n > 0 && n <= c.max ? n : null; };
                 var apply = function () {
-                    var v = trim($ci.val());
+                    var v = trim(ci.value);
                     if (v === '') { return; }
                     var n = valid(v);
                     if (n !== null) {
-                        $d.find('input[name="TableOptionValue"]').prop('checked', false);
-                        $cr.prop('checked', true);
+                        find(d, 'input[name="TableOptionValue"]').forEach(function (x) { x.checked = false; });
+                        cr.checked = true;
                         self.setLimit(n);
                     } else {
                         window.alert(c.invalid || t('Please enter a valid number between 1 and %max', { '%max': c.max }));
-                        $cr.prop('checked', false);
-                        $ci.val('');
+                        cr.checked = false;
+                        ci.value = '';
                     }
                 };
-                $ci.on('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); apply(); } });
-                $ci.on('blur', apply);
-                $cr.on('click', function () {
-                    var n = valid(trim($ci.val()));
+                this.listen(ci, 'keydown', null, function (e) { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); apply(); } });
+                this.listen(ci, 'blur', null, apply);
+                this.listen(cr, 'click', null, function () {
+                    var n = valid(trim(ci.value));
                     if (n !== null) { self.setLimit(n); }
                 });
-                $block.append($('<div class="table-options-row"></div>').append(
-                    $('<span class="table-options-key"></span>').append($('<label for="table-option-custom-input"></label>').text(c.label)),
-                    $('<span class="table-options-value table-options-custom-value"></span>').append($ci, ' ', $cr)));
+                var customLabel = make('<label for="table-option-custom-input"></label>');
+                setText(customLabel, c.label);
+                block.appendChild(append(make('<div class="table-options-row"></div>'),
+                    append(make('<span class="table-options-key"></span>'), customLabel),
+                    append(make('<span class="table-options-value table-options-custom-value"></span>'), ci, ' ', cr)));
             }
-            $bd.append($fs);
+            bd.appendChild(fs);
         }
         if (to.presets) {
-            this.$presets = $('<fieldset class="exp-dt-presets"></fieldset>');
-            if (lim) { $bd.append('<br />'); }
-            $bd.append(this.$presets);
+            this.presetsFieldset = make('<fieldset class="exp-dt-presets"></fieldset>');
+            if (lim) { append(bd, '<br />'); }
+            bd.appendChild(this.presetsFieldset);
             this.renderPresets();
         }
         if (to.columns) {
             var C = to.columns;
-            var $cf = $('<fieldset class="exp-dt-columns"></fieldset>').append($('<legend></legend>').text(C.legend || t('Visible table columns:')));
+            var columnsLegend = make('<legend></legend>');
+            setText(columnsLegend, C.legend || t('Visible table columns:'));
+            var cf = append(make('<fieldset class="exp-dt-columns"></fieldset>'), columnsLegend);
             if (C.filter) {
-                var F = $.extend({ label: t('Find a column'), placeholder: '' }, C.filter === true ? {} : C.filter);
-                var $fi = $('<input type="search" class="exp-dt-column-filter" autocomplete="off" />').attr({ id: ids + '-filter', placeholder: F.placeholder });
-                $cf.append($('<div class="exp-dt-column-filter-row"></div>').append(
-                    $('<label></label>').attr('for', ids + '-filter').text(F.label), ' ', $fi));
-                $fi.on('input', function () { self.filterOptionColumns($fi.val()); });
-                $fi.on('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); } });
-                this.$columnFilter = $fi;
+                var F = extend({ label: t('Find a column'), placeholder: '' }, C.filter === true ? {} : C.filter);
+                var fi = make('<input type="search" class="exp-dt-column-filter" autocomplete="off" />');
+                attrs(fi, { id: ids + '-filter', placeholder: F.placeholder });
+                var filterLabel = make('<label></label>');
+                attr(filterLabel, 'for', ids + '-filter');
+                setText(filterLabel, F.label);
+                cf.appendChild(append(make('<div class="exp-dt-column-filter-row"></div>'), filterLabel, ' ', fi));
+                this.listen(fi, 'input', null, function () { self.filterOptionColumns(fi.value); });
+                this.listen(fi, 'keydown', null, function (e) { if (e.key === 'Enter') { e.preventDefault(); } });
+                this.columnFilter = fi;
             }
-            this.$columnList = $('<div class="block exp-dt-column-list"></div>').appendTo($cf);
-            if (lim || to.presets) { $bd.append('<br />'); }
-            $bd.append($cf);
+            this.columnList = make('<div class="block exp-dt-column-list"></div>');
+            cf.appendChild(this.columnList);
+            if (lim || to.presets) { append(bd, '<br />'); }
+            bd.appendChild(cf);
             var ct = this.o.columnToggle || {};
             if (ct.ordered) {
-                var Or = $.extend({ legend: t('Order of the shown columns:'), hint: t('Drag a column, or use its buttons.') }, C.order || {});
-                var $of = $('<fieldset class="exp-dt-order-fieldset"></fieldset>').append($('<legend></legend>').text(Or.legend));
-                if (Or.hint) { $of.append($('<p class="exp-dt-order-hint"></p>').text(Or.hint)); }
-                this.$orderList = $('<ol class="exp-dt-order"></ol>').appendTo($of);
-                $bd.append('<br />', $of);
+                var Or = extend({ legend: t('Order of the shown columns:'), hint: t('Drag a column, or use its buttons.') }, C.order || {});
+                var orderLegend = make('<legend></legend>');
+                setText(orderLegend, Or.legend);
+                var of = append(make('<fieldset class="exp-dt-order-fieldset"></fieldset>'), orderLegend);
+                if (Or.hint) {
+                    var hint = make('<p class="exp-dt-order-hint"></p>');
+                    setText(hint, Or.hint);
+                    of.appendChild(hint);
+                }
+                this.orderList = make('<ol class="exp-dt-order"></ol>');
+                of.appendChild(this.orderList);
+                append(bd, '<br />', of);
                 this.bindOrderList();
             }
             this.renderOptionColumns();
         }
-        var $close = $('<button type="button" class="exp-dt-dialog-close"></button>').text(to.close || t('Close'));
-        var $footer = $('<div class="exp-dt-dialog-footer"></div>');
+        var close = make('<button type="button" class="exp-dt-dialog-close"></button>');
+        setText(close, to.close || t('Close'));
+        var footer = make('<div class="exp-dt-dialog-footer"></div>');
         (to.buttons || []).forEach(function (b) {
-            var $b = $('<button type="button" class="exp-dt-dialog-close exp-dt-dialog-button"></button>').text(b.label || '');
-            if (b.id) { $b.attr('id', b.id); }
-            if (b.title) { $b.attr('title', b.title); }
-            $b.on('click', function (e) { e.preventDefault(); if (isFn(b.onClick)) { b.onClick.call(self, self, e); } });
-            $footer.append($b, ' ');
+            var button = make('<button type="button" class="exp-dt-dialog-close exp-dt-dialog-button"></button>');
+            setText(button, b.label || '');
+            if (b.id) { attr(button, 'id', b.id); }
+            if (b.title) { attr(button, 'title', b.title); }
+            self.listen(button, 'click', null, function (e) { e.preventDefault(); if (isFn(b.onClick)) { b.onClick.call(self, self, self.userEvent(e)); } });
+            append(footer, button, ' ');
         });
-        $d.append($footer.append($close));
-        if (to.presets || (to.columns && (to.columns.filter || (this.o.columnToggle || {}).ordered))) { $d.addClass('exp-dt-dialog-wide'); }
-        $close.on('click', function () { self.closeOptions(); });
-        $d.on('cancel', function (e) { e.preventDefault(); self.closeOptions(); });
-        $d.on('keydown', function (e) { if (e.key === 'Escape') { e.preventDefault(); self.closeOptions(); } });
-        $d.on('click', function (e) { if (e.target === $d[0] && to.backdropCloses) { self.closeOptions(); } });
-        (to.container ? $(to.container).first() : this.$root).append($d);
-        this.$options = $d;
+        d.appendChild(append(footer, close));
+        if (to.presets || (to.columns && (to.columns.filter || (this.o.columnToggle || {}).ordered))) { addClass(d, 'exp-dt-dialog-wide'); }
+        this.listen(close, 'click', null, function () { self.closeOptions(); });
+        this.listen(d, 'cancel', null, function (e) { e.preventDefault(); self.closeOptions(); });
+        this.listen(d, 'keydown', null, function (e) { if (e.key === 'Escape') { e.preventDefault(); self.closeOptions(); } });
+        this.listen(d, 'click', null, function (e) { if (e.target === d && to.backdropCloses) { self.closeOptions(); } });
+        var host = to.container ? first(to.container) : this.root;
+        if (host) { host.appendChild(d); }
+        this.optionsDialog = d;
     };
 
     /** Keeps the focus on "the same" control when part of the dialog is drawn again. */
-    function keepFocus($scope, draw) {
+    function keepFocus(scope, draw) {
         var a = document.activeElement, sel = null;
-        if (a && $scope[0] && $scope[0].contains(a)) {
+        if (a && scope && scope.contains(a)) {
             var key = a.getAttribute('data-key') || a.value, role = a.getAttribute('data-role') || a.getAttribute('name');
             sel = { key: key, role: role };
         }
         draw();
         if (sel) {
-            var $t = $scope.find('[data-role="' + sel.role + '"][data-key="' + sel.key + '"], [name="' + sel.role + '"][value="' + sel.key + '"]').filter(':enabled').first();
-            if (!$t.length) { $t = $scope.find('[data-role="' + sel.role + '"]').filter(':enabled').first(); }
-            if ($t.length) { $t[0].focus(); }
+            var enabled = function (el) { return el.matches(':enabled'); };
+            var target = find(scope, '[data-role="' + sel.role + '"][data-key="' + sel.key + '"], [name="' + sel.role + '"][value="' + sel.key + '"]').filter(enabled)[0];
+            if (!target) { target = find(scope, '[data-role="' + sel.role + '"]').filter(enabled)[0]; }
+            if (target) { target.focus(); }
         }
     }
 
     /** Table options: the column check boxes, grouped by each column's group, and the order list. */
     DataTable.prototype.renderOptionColumns = function () {
-        var self = this, $cb = this.$columnList, C = (this.o.tableOptions || {}).columns || {}, ct = this.o.columnToggle || {};
-        if (!$cb) { return; }
-        keepFocus($cb, function () {
-            $cb.empty();
+        var self = this, cb = this.columnList, C = (this.o.tableOptions || {}).columns || {}, ct = this.o.columnToggle || {};
+        if (!cb) { return; }
+        keepFocus(cb, function () {
+            empty(cb);
             var G = self.optionColumnGroups(), groups = G.groups, byGroup = G.byGroup;
             var grouped = groups.length > 1 || (groups.length === 1 && groups[0] !== '');
             groups.forEach(function (g, gi) {
-                var $target = $cb;
+                var target = cb;
                 if (grouped) {
                     var gid = self.id + '-colgroup-' + gi;
-                    $target = $('<div class="exp-dt-column-group" role="group"></div>').attr('aria-labelledby', gid).appendTo($cb);
-                    $target.append($('<h3 class="exp-dt-column-group-title"></h3>').attr('id', gid).text(g || C.otherGroup || t('Other')));
+                    target = make('<div class="exp-dt-column-group" role="group"></div>');
+                    attr(target, 'aria-labelledby', gid);
+                    cb.appendChild(target);
+                    var h = make('<h3 class="exp-dt-column-group-title"></h3>');
+                    attr(h, 'id', gid);
+                    setText(h, g || C.otherGroup || t('Other'));
+                    target.appendChild(h);
                 }
                 byGroup[g].forEach(function (entry) {
                     var col = entry.col, id = 'table-option-col-btn-' + entry.i;
-                    var $x = $('<input type="checkbox" name="TableOptionColumn" />').attr({ id: id, value: col.key }).prop('checked', !col.hidden);
-                    $x.on('click', function () {
+                    var x = make('<input type="checkbox" name="TableOptionColumn" />');
+                    attrs(x, { id: id, value: col.key });
+                    x.checked = !col.hidden;
+                    self.listen(x, 'click', null, function () {
                         var keys;
                         if (ct.ordered) {
                             keys = self.shownColumns().filter(function (k) { return k !== col.key; });
                             if (this.checked) { keys.push(col.key); }
                         } else {
-                            keys = $cb.find('input[name="TableOptionColumn"]:checked').map(function () { return this.value; }).get();
+                            keys = find(cb, 'input[name="TableOptionColumn"]:checked').map(function (i) { return i.value; });
                         }
                         self.setShown(keys);
                     });
-                    var $label = $('<label></label>').attr('for', id).text(col.label);
-                    if (col.title) { $label.attr('title', col.title); }
-                    $target.append($('<div class="table-options-row"></div>')
-                        .attr('data-search', (col.label + ' ' + (col.group || '') + ' ' + (col.title || '')).toLowerCase())
-                        .append($('<span class="table-options-key"></span>').append($label),
-                                $('<span class="table-options-value"></span>').append($x)));
+                    var label = make('<label></label>');
+                    attr(label, 'for', id);
+                    setText(label, col.label);
+                    if (col.title) { attr(label, 'title', col.title); }
+                    var row = make('<div class="table-options-row"></div>');
+                    attr(row, 'data-search', (col.label + ' ' + (col.group || '') + ' ' + (col.title || '')).toLowerCase());
+                    target.appendChild(append(row, append(make('<span class="table-options-key"></span>'), label),
+                                                   append(make('<span class="table-options-value"></span>'), x)));
                 });
             });
-            $cb.append($('<p class="exp-dt-column-none" hidden="hidden"></p>').text((C.filter && C.filter.none) || t('No columns found.')));
+            var none = make('<p class="exp-dt-column-none" hidden="hidden"></p>');
+            setText(none, (C.filter && C.filter.none) || t('No columns found.'));
+            cb.appendChild(none);
         });
-        if (this.$columnFilter) { this.filterOptionColumns(this.$columnFilter.val()); }
+        if (this.columnFilter) { this.filterOptionColumns(this.columnFilter.value); }
         this.renderOrderList();
     };
 
@@ -739,67 +1060,74 @@
 
     /** Shows only the column check boxes whose name (or group, or description) has the text. */
     DataTable.prototype.filterOptionColumns = function (text) {
-        var needle = trim(text || '').toLowerCase(), $cb = this.$columnList, any = false;
-        if (!$cb) { return; }
-        $cb.find('.table-options-row').each(function () {
-            var on = !needle || this.getAttribute('data-search').indexOf(needle) !== -1;
-            this.hidden = !on;
+        var needle = trim(text || '').toLowerCase(), cb = this.columnList, any = false;
+        if (!cb) { return; }
+        find(cb, '.table-options-row').forEach(function (row) {
+            var on = !needle || row.getAttribute('data-search').indexOf(needle) !== -1;
+            row.hidden = !on;
             if (on) { any = true; }
         });
-        $cb.find('.exp-dt-column-group').each(function () {
-            this.hidden = $(this).find('.table-options-row').filter(function () { return !this.hidden; }).length === 0;
+        find(cb, '.exp-dt-column-group').forEach(function (group) {
+            group.hidden = find(group, '.table-options-row').filter(function (row) { return !row.hidden; }).length === 0;
         });
-        $cb.find('.exp-dt-column-none').prop('hidden', any);
+        find(cb, '.exp-dt-column-none').forEach(function (p) { p.hidden = any; });
     };
 
     /** The shown columns in their order: drag one to another place, or move it with its up and down buttons. */
     DataTable.prototype.renderOrderList = function () {
-        var self = this, $ol = this.$orderList;
-        if (!$ol) { return; }
-        var O = $.extend({ up: t('Move %name up'), down: t('Move %name down') }, ((this.o.tableOptions || {}).columns || {}).order || {});
-        keepFocus($ol, function () {
-            $ol.empty();
+        var self = this, ol = this.orderList;
+        if (!ol) { return; }
+        var O = extend({ up: t('Move %name up'), down: t('Move %name down') }, ((this.o.tableOptions || {}).columns || {}).order || {});
+        keepFocus(ol, function () {
+            empty(ol);
             var keys = self.shownColumns();
             keys.forEach(function (k, i) {
                 var c = self.column(k), name = c.label || k;
-                var $li = $('<li class="exp-dt-order-item" draggable="true"></li>').attr('data-key', k);
-                $li.append($('<span class="exp-dt-order-handle" aria-hidden="true"></span>'),
-                           $('<span class="exp-dt-order-label"></span>').text(name),
-                           $('<button type="button" class="exp-dt-order-up" data-role="exp-dt-order-up">↑</button>')
-                               .attr({ 'data-key': k, 'aria-label': O.up.replace('%name', name), title: O.up.replace('%name', name) }).prop('disabled', i === 0),
-                           $('<button type="button" class="exp-dt-order-down" data-role="exp-dt-order-down">↓</button>')
-                               .attr({ 'data-key': k, 'aria-label': O.down.replace('%name', name), title: O.down.replace('%name', name) }).prop('disabled', i === keys.length - 1));
-                $ol.append($li);
+                var li = make('<li class="exp-dt-order-item" draggable="true"></li>');
+                attr(li, 'data-key', k);
+                var label = make('<span class="exp-dt-order-label"></span>');
+                setText(label, name);
+                var up = make('<button type="button" class="exp-dt-order-up" data-role="exp-dt-order-up">↑</button>');
+                attrs(up, { 'data-key': k, 'aria-label': O.up.replace('%name', name), title: O.up.replace('%name', name) });
+                up.disabled = i === 0;
+                var down = make('<button type="button" class="exp-dt-order-down" data-role="exp-dt-order-down">↓</button>');
+                attrs(down, { 'data-key': k, 'aria-label': O.down.replace('%name', name), title: O.down.replace('%name', name) });
+                down.disabled = i === keys.length - 1;
+                append(li, make('<span class="exp-dt-order-handle" aria-hidden="true"></span>'), label, up, down);
+                ol.appendChild(li);
             });
         });
     };
 
     DataTable.prototype.bindOrderList = function () {
-        var self = this, $ol = this.$orderList, dragKey = null;
-        var clear = function () { $ol.find('.exp-dt-drop-before, .exp-dt-drop-after, .exp-dt-dragging').removeClass('exp-dt-drop-before exp-dt-drop-after exp-dt-dragging'); };
-        $ol.on('click', 'button.exp-dt-order-up, button.exp-dt-order-down', function (e) {
+        var self = this, ol = this.orderList, dragKey = null;
+        var marks = 'exp-dt-drop-before exp-dt-drop-after';
+        var clear = function () { find(ol, '.exp-dt-drop-before, .exp-dt-drop-after, .exp-dt-dragging').forEach(function (el) { removeClass(el, marks + ' exp-dt-dragging'); }); };
+        var transfer = function (e) { return (e.originalEvent || e).dataTransfer; };
+        this.listen(ol, 'click', 'button.exp-dt-order-up, button.exp-dt-order-down', function (e) {
             e.preventDefault();
-            self.moveColumn(this.getAttribute('data-key'), $(this).hasClass('exp-dt-order-up') ? -1 : 1);
+            self.moveColumn(this.getAttribute('data-key'), this.classList.contains('exp-dt-order-up') ? -1 : 1);
         });
-        $ol.on('dragstart', 'li.exp-dt-order-item', function (e) {
+        this.listen(ol, 'dragstart', 'li.exp-dt-order-item', function (e) {
             dragKey = this.getAttribute('data-key');
-            var dt = e.originalEvent && e.originalEvent.dataTransfer;
+            var dt = transfer(e);
             if (dt) { dt.effectAllowed = 'move'; try { dt.setData('text/plain', dragKey); } catch (x) { /* old browsers */ } }
-            $(this).addClass('exp-dt-dragging');
+            addClass(this, 'exp-dt-dragging');
         });
-        $ol.on('dragover', 'li.exp-dt-order-item', function (e) {
+        this.listen(ol, 'dragover', 'li.exp-dt-order-item', function (e) {
             if (dragKey === null) { return; }
             e.preventDefault();
-            var dt = e.originalEvent && e.originalEvent.dataTransfer;
+            var dt = transfer(e);
             if (dt) { dt.dropEffect = 'move'; }
-            var r = this.getBoundingClientRect(), after = (e.originalEvent || e).clientY > r.top + r.height / 2;
-            $ol.find('.exp-dt-drop-before, .exp-dt-drop-after').not(this).removeClass('exp-dt-drop-before exp-dt-drop-after');
-            $(this).toggleClass('exp-dt-drop-after', after).toggleClass('exp-dt-drop-before', !after);
+            var item = this, r = item.getBoundingClientRect(), after = (e.originalEvent || e).clientY > r.top + r.height / 2;
+            find(ol, '.exp-dt-drop-before, .exp-dt-drop-after').forEach(function (el) { if (el !== item) { removeClass(el, marks); } });
+            toggleClass(item, 'exp-dt-drop-after', after);
+            toggleClass(item, 'exp-dt-drop-before', !after);
         });
-        $ol.on('drop', 'li.exp-dt-order-item', function (e) {
+        this.listen(ol, 'drop', 'li.exp-dt-order-item', function (e) {
             if (dragKey === null) { return; }
             e.preventDefault();
-            var target = this.getAttribute('data-key'), after = $(this).hasClass('exp-dt-drop-after');
+            var target = this.getAttribute('data-key'), after = this.classList.contains('exp-dt-drop-after');
             var keys = self.shownColumns().filter(function (k) { return k !== dragKey; });
             var at = keys.indexOf(target);
             if (target !== dragKey && at !== -1) {
@@ -809,70 +1137,89 @@
                 self.setShown(keys);
             }
         });
-        $ol.on('dragend', function () { dragKey = null; clear(); });
+        this.listen(ol, 'dragend', null, function () { dragKey = null; clear(); });
     };
 
     /** Table options: choose a preset, save the shown columns as one, delete one of your own. */
     DataTable.prototype.renderPresets = function () {
-        var self = this, $fs = this.$presets, P = $.extend({
+        var self = this, fs = this.presetsFieldset, P = extend({
             legend: t('Column presets:'), none: t('No preset'), choose: t('Preset'), name: t('Name of the new preset'),
             saveAs: t('Save current as...'), remove: t('Delete'), items: [], current: null
         }, (this.o.tableOptions || {}).presets || {});
-        if (!$fs) { return; }
+        if (!fs) { return; }
         var items = (isFn(P.items) ? P.items.call(this, this) : P.items) || [];
         var current = isFn(P.current) ? P.current.call(this, this) : P.current;
-        var find = function (id) { for (var i = 0; i < items.length; i++) { if (String(items[i].id) === String(id)) { return items[i]; } } return null; };
-        keepFocus($fs, function () {
-            $fs.empty().append($('<legend></legend>').text(P.legend));
+        var find1 = function (id) { for (var i = 0; i < items.length; i++) { if (String(items[i].id) === String(id)) { return items[i]; } } return null; };
+        keepFocus(fs, function () {
+            var legend = make('<legend></legend>');
+            setText(legend, P.legend);
+            append(empty(fs), legend);
             var sid = self.id + '-preset', nid = self.id + '-preset-name';
-            var $sel = $('<select class="exp-dt-preset-select" data-role="exp-dt-preset-select" data-key="s"></select>').attr('id', sid)
-                .append($('<option value=""></option>').text(P.none));
-            items.forEach(function (it) { $sel.append($('<option></option>').attr('value', it.id).text(it.name)); });
-            $sel.val(current !== null && current !== undefined && find(current) ? String(current) : '');
-            var $del = $('<button type="button" class="exp-dt-dialog-close exp-dt-preset-delete" data-role="exp-dt-preset-delete" data-key="d"></button>').text(P.remove);
-            var syncDel = function () { var it = find($sel.val()); $del.prop('disabled', !(it && it.own)); };
+            var sel = make('<select class="exp-dt-preset-select" data-role="exp-dt-preset-select" data-key="s"></select>');
+            attr(sel, 'id', sid);
+            var noneOption = make('<option value=""></option>');
+            setText(noneOption, P.none);
+            sel.appendChild(noneOption);
+            items.forEach(function (it) {
+                var option = make('<option></option>');
+                attr(option, 'value', it.id);
+                setText(option, it.name);
+                sel.appendChild(option);
+            });
+            sel.value = current !== null && current !== undefined && find1(current) ? String(current) : '';
+            var del = make('<button type="button" class="exp-dt-dialog-close exp-dt-preset-delete" data-role="exp-dt-preset-delete" data-key="d"></button>');
+            setText(del, P.remove);
+            var syncDel = function () { var it = find1(sel.value); del.disabled = !(it && it.own); };
             syncDel();
-            $sel.on('change', function () {
+            self.listen(sel, 'change', null, function () {
                 syncDel();
-                var it = find($sel.val());
+                var it = find1(sel.value);
                 if (it && isFn(P.onApply)) { P.onApply.call(self, it, self); }
             });
-            $del.on('click', function () {
-                var it = find($sel.val());
+            self.listen(del, 'click', null, function () {
+                var it = find1(sel.value);
                 if (!it || !it.own || !isFn(P.onDelete)) { return; }
                 Promise.resolve(P.onDelete.call(self, it, self)).then(function () { self.renderPresets(); });
             });
-            var $name = $('<input type="text" class="exp-dt-preset-name" data-role="exp-dt-preset-name" data-key="n" maxlength="60" />').attr({ id: nid, placeholder: P.name });
-            var $save = $('<button type="button" class="exp-dt-dialog-close exp-dt-preset-save" data-role="exp-dt-preset-save" data-key="v"></button>').text(P.saveAs);
-            var save = function () {
-                var name = trim($name.val());
-                if (!name) { $name[0].focus(); return; }
+            var name = make('<input type="text" class="exp-dt-preset-name" data-role="exp-dt-preset-name" data-key="n" maxlength="60" />');
+            attrs(name, { id: nid, placeholder: P.name });
+            var save = make('<button type="button" class="exp-dt-dialog-close exp-dt-preset-save" data-role="exp-dt-preset-save" data-key="v"></button>');
+            setText(save, P.saveAs);
+            var doSave = function () {
+                var value = trim(name.value);
+                if (!value) { name.focus(); return; }
                 if (!isFn(P.onSave)) { return; }
-                Promise.resolve(P.onSave.call(self, name, self.shownColumns(), self)).then(function () { self.renderPresets(); });
+                Promise.resolve(P.onSave.call(self, value, self.shownColumns(), self)).then(function () { self.renderPresets(); });
             };
-            $save.on('click', save);
-            $name.on('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); save(); } });
-            $fs.append($('<div class="exp-dt-preset-row"></div>').append($('<label></label>').attr('for', sid).text(P.choose), ' ', $sel, ' ', $del),
-                       $('<div class="exp-dt-preset-row"></div>').append($('<label class="exp-visually-hidden"></label>').attr('for', nid).text(P.name), $name, ' ', $save));
+            self.listen(save, 'click', null, doSave);
+            self.listen(name, 'keydown', null, function (e) { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); doSave(); } });
+            var chooseLabel = make('<label></label>');
+            attr(chooseLabel, 'for', sid);
+            setText(chooseLabel, P.choose);
+            var nameLabel = make('<label class="exp-visually-hidden"></label>');
+            attr(nameLabel, 'for', nid);
+            setText(nameLabel, P.name);
+            append(fs, append(make('<div class="exp-dt-preset-row"></div>'), chooseLabel, ' ', sel, ' ', del),
+                       append(make('<div class="exp-dt-preset-row"></div>'), nameLabel, name, ' ', save));
         });
     };
 
     DataTable.prototype.openOptions = function () {
         if (!this.o.tableOptions) { return; }
-        if (!this.$options) { this.buildOptions(); }
-        var d = this.$options[0];
+        if (!this.optionsDialog) { this.buildOptions(); }
+        var d = this.optionsDialog;
         this.optionsReturn = document.activeElement;
         if (!d.open) {
             if (isFn(d.showModal)) { d.showModal(); } else { d.setAttribute('open', 'open'); }
         }
-        var $first = this.$options.find('input:checked, input, button').first();
-        if ($first.length) { $first[0].focus(); }
+        var target = d.querySelector('input:checked, input, button');
+        if (target) { target.focus(); }
         this.emit('options', { open: true });
     };
 
     DataTable.prototype.closeOptions = function () {
-        if (!this.$options) { return; }
-        var d = this.$options[0];
+        if (!this.optionsDialog) { return; }
+        var d = this.optionsDialog;
         if (d.open) { if (isFn(d.close)) { d.close(); } else { d.removeAttribute('open'); } }
         if (this.optionsReturn && this.optionsReturn.focus && document.contains(this.optionsReturn)) { this.optionsReturn.focus(); }
         this.emit('options', { open: false });
@@ -896,9 +1243,11 @@
         var c = this.column(key);
         if (!c) { return; }
         c.hidden = !!hidden;
-        var i = this.columns.indexOf(c);
-        this.$head.find('th').eq(i).prop('hidden', !!hidden);
-        this.$body.children('tr').each(function () { $(this.cells[i]).prop('hidden', !!hidden); });
+        var i = this.columns.indexOf(c), th = find(this.head, 'th')[i];
+        if (th) { th.hidden = !!hidden; }
+        Array.prototype.forEach.call(this.body.children, function (tr) {
+            if (tr.tagName === 'TR' && tr.cells[i]) { tr.cells[i].hidden = !!hidden; }
+        });
         this.updateMessageSpan();
     };
     DataTable.prototype.visibleColumns = function () {
@@ -916,7 +1265,7 @@
      */
     DataTable.prototype.setShown = function (keys, opts) {
         opts = opts || {};
-        var self = this, ct = this.o.columnToggle || {}, before = this.visibleColumns(), reload = false;
+        var self = this, ct = this.o.columnToggle || {}, beforeKeys = this.visibleColumns(), reload = false;
         keys = (keys || []).filter(function (k) { var c = self.column(k); return c && c.label && c.toggle !== false; });
         this.columns.forEach(function (c) {
             if (!c.label || c.toggle === false) { return; }
@@ -926,13 +1275,13 @@
         });
         if (ct.ordered) { this.applyOrder(keys); }
         this.shownKeys = keys.slice();
-        if (this.visibleColumns().join(',') !== before.join(',') || reload) {
+        if (this.visibleColumns().join(',') !== beforeKeys.join(',') || reload) {
             this.cancelEdit();
             this.buildHead();
             this.updateMessageSpan();
             if (reload) { this.load(); } else { this.render(); }
         }
-        if (this.$options) { this.renderOptionColumns(); }
+        if (this.optionsDialog) { this.renderOptionColumns(); }
         if (opts.save !== false) { this.saveColumns(keys); }
         return keys;
     };
@@ -950,11 +1299,11 @@
     // ---- copying a cell ----------------------------------------------------------------------------------
 
     DataTable.prototype.copyTexts = function () {
-        return $.extend({ title: t('Click to copy'), done: t('Copied'), failed: t('Not copied') }, this.o.copy || {});
+        return extend({ title: t('Click to copy'), done: t('Copied'), failed: t('Not copied') }, this.o.copy || {});
     };
 
     /** The text a copy cell puts on the clipboard: copy(row) when copy is a function, else the row's value. */
-    DataTable.prototype.copyValue = function (c, row, $td) {
+    DataTable.prototype.copyValue = function (c, row) {
         var v = isFn(c.copy) ? c.copy.call(this, row, c, this) : row[c.key];
         if (v === undefined || v === null) { return ''; }
         if (typeof v === 'object') { v = Array.isArray(v) ? v.join(', ') : JSON.stringify(v); }
@@ -963,9 +1312,10 @@
 
     /** Puts the cell's value on the clipboard and says so in a small confirmation; a Promise of true or false. */
     DataTable.prototype.copyCell = function (td) {
-        var $td = $(td), row = $.data($td.closest('tr')[0], 'expRow'), c = this.column($td.attr('data-key'));
+        td = first(td);
+        var tr = td && td.closest('tr'), row = this.rowData(tr), c = td && this.column(td.getAttribute('data-key'));
         if (!row || !c || !c.copy) { return Promise.resolve(false); }
-        var self = this, text = this.copyValue(c, row, $td), T = this.copyTexts();
+        var self = this, text = this.copyValue(c, row), T = this.copyTexts();
         var fallback = function () {
             var ta = document.createElement('textarea'), ok = false;
             ta.value = text;
@@ -981,10 +1331,12 @@
             ? window.navigator.clipboard.writeText(text).then(function () { return true; }, function () { return fallback(); })
             : Promise.resolve(fallback());
         return p.then(function (ok) {
-            $td.find('.exp-dt-copied').remove();
-            var $note = $('<span class="exp-dt-copied" aria-hidden="true"></span>').toggleClass('exp-dt-copy-failed', !ok).text(ok ? T.done : T.failed);
-            $td.append($note);
-            window.setTimeout(function () { $note.remove(); }, 1400);
+            find(td, '.exp-dt-copied').forEach(remove);
+            var note = make('<span class="exp-dt-copied" aria-hidden="true"></span>');
+            toggleClass(note, 'exp-dt-copy-failed', !ok);
+            setText(note, ok ? T.done : T.failed);
+            td.appendChild(note);
+            window.setTimeout(function () { remove(note); }, 1400);
             self.announce(ok ? T.done : T.failed);
             self.emit('copy', { row: row, key: c.key, text: text, copied: ok });
             return ok;
@@ -1029,8 +1381,11 @@
             key = url + '::' + JSON.stringify(params || null);
             request = function () {
                 return new Promise(function (resolve, reject) {
-                    $.ajax({ url: url, method: src.method || 'GET', data: params, dataType: 'json', timeout: src.timeout || 0 })
+                    // through jQuery when the page has it, as before; else fetch, sent the same way
+                    var opts = { url: url, method: src.method || 'GET', data: params, dataType: 'json', timeout: src.timeout || 0 };
+                    (self.jq ? self.jq.ajax(opts) : Exp.util.request(opts))
                         .then(function (json) { resolve(json); }, function (xhr, status) {
+                            status = status === undefined ? xhr.textStatus : status;
                             var e = new Error(status === 'timeout' ? t('No answer from the server.') : t('The server answered with an error (HTTP %status).', { '%status': xhr.status }));
                             e.status = xhr.status; e.kind = status === 'timeout' ? 'timeout' : (xhr.status ? 'server' : 'network'); e.response = xhr;
                             reject(e);
@@ -1056,26 +1411,27 @@
     DataTable.prototype.flushCache = function () { this.cache = {}; this.cacheOrder = []; };
 
     DataTable.prototype.showMessage = function (text, cls) {
-        this.$message.find('td').attr('class', cls || '').text(text);
+        var td = this.message.querySelector('td');
+        attr(td, 'class', cls || '');
+        setText(td, text);
         this.updateMessageSpan();
-        this.$message.prop('hidden', false);
+        this.message.hidden = false;
     };
-    DataTable.prototype.hideMessage = function () { this.$message.prop('hidden', true); };
+    DataTable.prototype.hideMessage = function () { this.message.hidden = true; };
     DataTable.prototype.updateMessageSpan = function () {
-        this.$message.find('td').attr('colspan', Math.max(1, this.visibleColumns().length));
+        attr(this.message.querySelector('td'), 'colspan', Math.max(1, this.visibleColumns().length));
     };
 
     /** Loads the rows for the current state; a Promise of the result. */
     DataTable.prototype.load = function () {
         var self = this, state = this.stateCopy(), seq = ++this.seq;
         this.cancelEdit();
-        this.$table.attr('aria-busy', 'true');
-        var shown = false;
-        var timer = window.setTimeout(function () { shown = true; self.showMessage(self.texts.loading, 'exp-dt-loading'); }, 0);
+        this.table.setAttribute('aria-busy', 'true');
+        var timer = window.setTimeout(function () { self.showMessage(self.texts.loading, 'exp-dt-loading'); }, 0);
         return this.fetch(state).then(function (res) {
             window.clearTimeout(timer);
             if (seq !== self.seq) { return res; }
-            self.$table.removeAttr('aria-busy');
+            self.table.removeAttribute('aria-busy');
             self.total = Number(res.total) || 0;
             if (typeof res.offset === 'number' && res.offset >= 0) { self.state.offset = res.offset; }
             self.rowsData = res.rows || [];
@@ -1087,7 +1443,7 @@
         }, function (err) {
             window.clearTimeout(timer);
             if (seq !== self.seq) { return null; }
-            self.$table.removeAttr('aria-busy');
+            self.table.removeAttribute('aria-busy');
             self.showMessage(err && err.kind === 'signedout' ? err.message : self.texts.error, 'exp-dt-error');
             self.emit('error', { error: err, state: state });
             if (window.console) { window.console.warn('Exp.datatable: the rows were not loaded', err && err.message); }
@@ -1096,26 +1452,29 @@
     };
     DataTable.prototype.reload = DataTable.prototype.load;
 
-    DataTable.prototype.renderCell = function (c, row, $td) {
+    /** One cell's content; td: the cell (in jQuery as well, as the jQuery version took it). */
+    DataTable.prototype.renderCell = function (c, row, td) {
+        td = td && td.jquery ? td[0] : td;
         if (this.select && c.key === this.select.key) {
             var s = this.select, value = isFn(s.value) ? s.value(row) : row[this.o.rowKey || 'id'];
-            var $c = $('<input type="checkbox" />').attr('value', value);
-            if (s.className) { $c.addClass(s.className); }
-            if (s.name) { $c.attr('name', s.name); }
+            var box = make('<input type="checkbox" />');
+            attr(box, 'value', value);
+            if (s.className) { addClass(box, s.className); }
+            if (s.name) { attr(box, 'name', s.name); }
             var label = isFn(s.label) ? s.label(row) : null;
-            if (label) { $c.attr('aria-label', t('Select %name', { '%name': label })); }
-            $td.append($c);
+            if (label) { attr(box, 'aria-label', t('Select %name', { '%name': label })); }
+            td.appendChild(box);
             return;
         }
         if (isFn(c.render)) {
-            var out = c.render.call(this, row, $td, this);
+            var out = c.render.call(this, row, this.wrap(td), this);
             if (out === undefined || out === null) { return; }
-            if (typeof out === 'string') { $td[0].innerHTML = out; } else { $td.append(out); }
+            if (typeof out === 'string') { td.innerHTML = out; } else { append(td, out); }
             return;
         }
         var v = row[c.key];
         if (c.format === 'date') { v = v === null || v === undefined || v === '' ? '' : formatDate(v, c.dateFormat || this.o.dateFormat); }
-        $td.text(v === null || v === undefined ? '' : String(v));
+        setText(td, v === null || v === undefined ? '' : String(v));
     };
 
     DataTable.prototype.canEdit = function (row) {
@@ -1127,8 +1486,8 @@
         var self = this, rows = this.rowsData, rk = this.o.rowKey;
         this.lastChecked = null;
         if (this.o.source && this.o.source.dom) {
-            this.$body.children('tr').detach();
-            rows.forEach(function (r) { self.$body.append(r._tr); });
+            Array.prototype.slice.call(this.body.children).forEach(function (tr) { if (tr.tagName === 'TR') { remove(tr); } });
+            rows.forEach(function (r) { self.body.appendChild(r._tr); });
         } else {
             var frag = document.createDocumentFragment();
             rows.forEach(function (row, ri) {
@@ -1136,14 +1495,15 @@
                 tr.className = ri % 2 ? 'exp-dt-odd' : 'exp-dt-even';
                 if (ri === 0) { tr.className += ' exp-dt-row-first'; }
                 if (rk && row[rk] !== undefined) { tr.setAttribute('data-row-key', row[rk]); }
-                $.data(tr, 'expRow', row);
+                rowsOf.set(tr, row);
+                if (self.jq) { self.jq.data(tr, 'expRow', row); }
                 self.columns.forEach(function (c) {
-                    var td = document.createElement('td'), $td = $(td);
+                    var td = document.createElement('td');
                     td.setAttribute('data-key', c.key);
                     td.className = 'exp-dt-col-' + c.key + alignClass(c) + (c.className ? ' ' + c.className : '');
                     if (c.hidden) { td.hidden = true; }
-                    self.renderCell(c, row, $td);
-                    if (c.copy && self.copyValue(c, row, $td) !== '') {
+                    self.renderCell(c, row, td);
+                    if (c.copy && self.copyValue(c, row) !== '') {
                         td.className += ' exp-dt-copy';
                         td.tabIndex = 0;
                         td.title = self.copyTexts().title;
@@ -1151,13 +1511,13 @@
                     if (editableType(c) && self.canEdit(row)) {
                         td.className += ' exp-dt-editable';
                         td.tabIndex = 0;
-                        td.setAttribute('aria-label', (c.label || c.key) + ': ' + $td.text() + '. ' + t('Press Enter to edit'));
+                        td.setAttribute('aria-label', (c.label || c.key) + ': ' + td.textContent + '. ' + t('Press Enter to edit'));
                     }
                     tr.appendChild(td);
                 });
                 frag.appendChild(tr);
             });
-            this.$body.empty().append(frag);
+            empty(this.body).appendChild(frag);
         }
         if (rows.length) { this.hideMessage(); } else { this.showMessage(this.texts.empty, 'exp-dt-empty'); }
         this.syncAll();
@@ -1185,9 +1545,9 @@
         if (this.paging.off || !(limit > 0) || limit === this.state.limit) { return Promise.resolve(null); }
         this.state.offset = normalizeOffset(this.state.offset, this.total, limit);
         this.state.limit = limit;
-        if (this.$options) {
-            this.$options.find('input[name="TableOptionValue"]').each(function () {
-                if (this.value !== 'custom' && Number(this.value) === limit) { this.checked = true; }
+        if (this.optionsDialog) {
+            find(this.optionsDialog, 'input[name="TableOptionValue"]').forEach(function (r) {
+                if (r.value !== 'custom' && Number(r.value) === limit) { r.checked = true; }
             });
         }
         this.emit('page', { page: this.page(), offset: this.state.offset, limit: limit });
@@ -1210,7 +1570,7 @@
 
     DataTable.prototype.setFilter = function (text) {
         text = String(text === undefined || text === null ? '' : text);
-        if (this.$filter && this.$filter.val() !== text) { this.$filter.val(text); }
+        if (this.filterInput && this.filterInput.value !== text) { this.filterInput.value = text; }
         this.state.filter = text;
         this.state.offset = 0;
         this.emit('filter', { filter: text });
@@ -1218,42 +1578,48 @@
     };
 
     DataTable.prototype.announce = function (text) {
-        var $s = this.$status;
-        $s.text('');
-        window.setTimeout(function () { $s.text(text); }, 50);
+        var status = this.status;
+        status.textContent = '';
+        window.setTimeout(function () { status.textContent = text; }, 50);
     };
 
+    /** An event: on the element (with jQuery through it as well) and page-wide through Exp.emit(). */
     DataTable.prototype.emit = function (what, data) {
-        data = $.extend({ table: this.el }, data);
-        this.$el.trigger('exp:datatable:' + what, [data]);
+        data = extend({ table: this.el }, data);
+        fire(this.el, 'exp:datatable:' + what, data, this.jq);
         Exp.emit('exp:datatable:' + what, data);
     };
 
     // ---- selection ---------------------------------------------------------------------------------------
 
-    DataTable.prototype.checks = function () {
+    DataTable.prototype.checkboxes = function () {
         var s = this.select;
-        if (!s) { return $(); }
-        return this.$body.find('td[data-key="' + s.key + '"] input[type=checkbox]');
+        return s ? find(this.body, 'td[data-key="' + s.key + '"] input[type=checkbox]') : [];
     };
+    /** The selection check boxes of the rows (in jQuery through $.fn.expDataTable). */
+    DataTable.prototype.checks = function () { return this.wrap(this.checkboxes()); };
     DataTable.prototype.selected = function () {
-        return this.checks().filter(':checked').map(function () { return $.data($(this).closest('tr')[0], 'expRow'); }).get();
+        var self = this;
+        return this.checkboxes().filter(function (c) { return c.checked; })
+            .map(function (c) { return self.rowData(c.closest('tr')); })
+            .filter(function (row) { return row !== null && row !== undefined; });
     };
     DataTable.prototype.selectAll = function (on) {
-        this.checks().prop('checked', on !== false);
+        this.checkboxes().forEach(function (c) { c.checked = on !== false; });
         this.syncAll();
         this.emitSelect();
     };
     DataTable.prototype.invert = function () {
-        this.checks().each(function () { this.checked = !this.checked; });
+        this.checkboxes().forEach(function (c) { c.checked = !c.checked; });
         this.syncAll();
         this.emitSelect();
     };
     DataTable.prototype.syncAll = function () {
-        var c = this.checks(), n = c.filter(':checked').length;
-        c.each(function () { $(this).closest('tr').toggleClass('exp-dt-selected', this.checked); });
-        if (this.$all) {
-            this.$all.prop('checked', c.length > 0 && n === c.length).prop('indeterminate', n > 0 && n < c.length);
+        var c = this.checkboxes(), n = c.filter(function (x) { return x.checked; }).length;
+        c.forEach(function (x) { var tr = x.closest('tr'); if (tr) { toggleClass(tr, 'exp-dt-selected', x.checked); } });
+        if (this.checkAll) {
+            this.checkAll.checked = c.length > 0 && n === c.length;
+            this.checkAll.indeterminate = n > 0 && n < c.length;
         }
     };
     DataTable.prototype.emitSelect = function () {
@@ -1264,35 +1630,40 @@
     // ---- inline editing -----------------------------------------------------------------------------------
 
     DataTable.prototype.edit = function (td) {
-        var $td = $(td), $tr = $td.closest('tr'), row = $.data($tr[0], 'expRow'), key = $td.attr('data-key');
+        td = first(td);
+        if (!td) { return; }
+        var tr = td.closest('tr'), row = this.rowData(tr), key = td.getAttribute('data-key');
         var c = this.column(key), et = c && editableType(c);
         if (!row || !et || !this.canEdit(row)) { return; }
         if (this.editing && this.editing.td === td) { return; }
         this.commitEdit();
         var self = this, old = row[key];
-        var $in = $('<input type="text" class="exp-dt-editor" />').attr('aria-label', c.label || key)
-            .val(old === null || old === undefined ? '' : String(old));
+        var input = make('<input type="text" class="exp-dt-editor" />');
+        attr(input, 'aria-label', c.label || key);
+        input.value = old === null || old === undefined ? '' : String(old);
         // over the cell, as the classic cell editor was: the value stays in the cell beneath it until it is saved
-        $td.addClass('exp-dt-editing').append($in);
-        this.editing = { td: td, $in: $in, row: row, key: key, old: old, column: c, type: et };
-        $in.on('keydown', function (e) {
+        addClass(td, 'exp-dt-editing');
+        td.appendChild(input);
+        this.editing = { td: td, input: input, row: row, key: key, old: old, column: c, type: et };
+        if (this.jq) { this.editing.$in = this.jq(input); }
+        this.listen(input, 'keydown', null, function (e) {
             if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); self.commitEdit(); }
             else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); self.cancelEdit(true); }
         });
-        $in.on('focusout', function () {
-            window.setTimeout(function () { if (self.editing && self.editing.$in === $in && document.activeElement !== $in[0]) { self.commitEdit(); } }, 0);
+        this.listen(input, 'focusout', null, function () {
+            window.setTimeout(function () { if (self.editing && self.editing.input === input && document.activeElement !== input) { self.commitEdit(); } }, 0);
         });
-        $in[0].focus();
-        $in[0].select();
+        input.focus();
+        input.select();
     };
 
     DataTable.prototype.endEdit = function (show, focus) {
         var ed = this.editing;
         if (!ed) { return; }
         this.editing = null;
-        var $td = $(ed.td).removeClass('exp-dt-editing');
-        ed.$in.remove();
-        if (show !== undefined) { $td.empty(); this.renderCell(ed.column, ed.row, $td); }
+        removeClass(ed.td, 'exp-dt-editing');
+        remove(ed.input);
+        if (show !== undefined) { empty(ed.td); this.renderCell(ed.column, ed.row, ed.td); }
         if (focus) { ed.td.focus(); }
     };
 
@@ -1304,15 +1675,15 @@
     DataTable.prototype.commitEdit = function () {
         var ed = this.editing;
         if (!ed) { return; }
-        var raw = ed.$in.val(), value = raw;
+        var raw = ed.input.value, value = raw;
         if (ed.type.type === 'number') { value = validateNumber(raw); }
         if (isFn(ed.type.validate)) { value = ed.type.validate(raw, ed.old, ed.row); }
         if (value === undefined) {
-            ed.$in.val(ed.old === null || ed.old === undefined ? '' : String(ed.old));
+            ed.input.value = ed.old === null || ed.old === undefined ? '' : String(ed.old);
             this.emit('invalid', { row: ed.row, key: ed.key, value: raw });
             return;
         }
-        var self = this, row = ed.row, key = ed.key, old = ed.old, td = ed.td, refocus = document.activeElement === ed.$in[0];
+        var self = this, row = ed.row, key = ed.key, old = ed.old, td = ed.td, refocus = document.activeElement === ed.input;
         row[key] = value;
         this.endEdit(true, refocus);
         var ie = this.o.inlineEdit, p;
@@ -1328,7 +1699,7 @@
             if (ie.reloadWhenSorted !== false && self.state.sort && self.state.sort.key === key) { self.load(); }
         }, function (err) {
             row[key] = old;
-            if (document.contains(td)) { $(td).empty(); self.renderCell(self.column(key), row, $(td)); }
+            if (document.contains(td)) { empty(td); self.renderCell(self.column(key), row, td); }
             self.announce((err && err.message) || self.texts.error);
             self.emit('error', { error: err, row: row, key: key, value: value });
             if (window.console) { window.console.warn('Exp.datatable: the change was not saved', err && err.message); }
@@ -1337,84 +1708,163 @@
 
     // ---- events ------------------------------------------------------------------------------------------
 
+    var CONTROLS = 'a, input, button, select, textarea';
+
     DataTable.prototype.bind = function () {
         var self = this;
         // on the table, not the header: the header is built again when the columns change order
-        this.$table.on('click', 'thead button.exp-dt-sort', function (e) {
+        this.listen(this.table, 'click', 'thead button.exp-dt-sort', function (e) {
             e.preventDefault();
-            self.sortBy($(this).closest('th').attr('data-key'));
+            var th = this.closest('th');
+            self.sortBy(th ? th.getAttribute('data-key') : undefined);
         });
-        this.$table.on('click', 'thead input.exp-dt-check-all', function () { self.selectAll(this.checked); });
+        this.listen(this.table, 'click', 'thead input.exp-dt-check-all', function () { self.selectAll(this.checked); });
         // cells with copy: a click (or Enter / Space on the focused cell) puts the value on the clipboard
-        this.$body.on('click', 'td.exp-dt-copy', function (e) {
-            if ($(e.target).closest('a, input, button, select, textarea').length) { return; }
+        this.listen(this.body, 'click', 'td.exp-dt-copy', function (e) {
+            if (closest(e.target, CONTROLS)) { return; }
             self.copyCell(this);
         });
-        this.$body.on('keydown', 'td.exp-dt-copy', function (e) {
+        this.listen(this.body, 'keydown', 'td.exp-dt-copy', function (e) {
             if ((e.key === 'Enter' || e.key === ' ') && e.target === this) { e.preventDefault(); self.copyCell(this); }
         });
-        this.$body.on('click', 'td[data-key] input[type=checkbox]', function (e) {
-            if (!self.select || $(this).closest('td').attr('data-key') !== self.select.key) { return; }
-            var all = self.checks(), i = all.index(this);
+        this.listen(this.body, 'click', 'td[data-key] input[type=checkbox]', function (e) {
+            var td = this.closest('td');
+            if (!self.select || !td || td.getAttribute('data-key') !== self.select.key) { return; }
+            var all = self.checkboxes(), i = all.indexOf(this);
             if (self.select.ranges && e.shiftKey && self.lastChecked !== null && self.lastChecked < all.length) {
                 var a = Math.min(i, self.lastChecked), b = Math.max(i, self.lastChecked), on = this.checked;
-                all.slice(a, b + 1).prop('checked', on);
+                all.slice(a, b + 1).forEach(function (x) { x.checked = on; });
             }
             self.lastChecked = i;
             self.syncAll();
             self.emitSelect();
         });
-        this.$body.on('click', 'td.exp-dt-editable', function (e) {
+        this.listen(this.body, 'click', 'td.exp-dt-editable', function (e) {
             if (self.editing && self.editing.td === this) { return; }
-            if ($(e.target).closest('a, input, button, select, textarea').length) { return; }
+            if (closest(e.target, CONTROLS)) { return; }
             self.edit(this);
         });
         if (this.o.keyboard) {
-            this.$body.on('keydown', function (e) { self.bodyKey(e); });
+            this.listen(this.body, 'keydown', null, function (e) { self.bodyKey(e); });
         }
-        this.$root.on('keydown.expdt', function (e) {
+        this.listen(this.root, 'keydown.expdt', null, function (e) {
             if (e.key === 'Escape') { self.closeMenus(); }
         });
     };
 
     /** Keyboard in the rows: Enter or F2 edits a cell, arrows move between rows and cells, Home and End. */
     DataTable.prototype.bodyKey = function (e) {
-        var $t = $(e.target);
-        if ($t.is('input.exp-dt-editor')) { return; }
-        var $td = $t.closest('td'), $tr = $td.closest('tr');
-        if (!$td.length) { return; }
-        if ($t.is('td.exp-dt-editable') && (e.key === 'Enter' || e.key === 'F2')) { e.preventDefault(); this.edit($td[0]); return; }
-        var focusables = function ($cell) { return $cell.find('a[href], input, button, select, textarea').addBack('[tabindex]').filter(':visible'); };
-        var go = function ($row, index) {
-            if (!$row.length) { return false; }
-            var $cell = $($row[0].cells[index]), $f = focusables($cell);
-            if (!$f.length) { $f = focusables($row.children('td')); }
-            if ($f.length) { $f[0].focus(); return true; }
+        var target = e.target;
+        if (matches(target, 'input.exp-dt-editor')) { return; }
+        var td = closest(target, 'td'), tr = td && td.closest('tr');
+        if (!td) { return; }
+        if (matches(target, 'td.exp-dt-editable') && (e.key === 'Enter' || e.key === 'F2')) { e.preventDefault(); this.edit(td); return; }
+        var focusables = function (cells) {
+            var out = [];
+            cells.forEach(function (cell) {
+                if (cell.hasAttribute('tabindex')) { out.push(cell); }
+                out.push.apply(out, find(cell, 'a[href], input, button, select, textarea'));
+            });
+            return out.filter(visible);
+        };
+        var go = function (row, index) {
+            if (!row) { return false; }
+            var f = focusables(row.cells[index] ? [row.cells[index]] : []);
+            if (!f.length) { f = focusables(Array.prototype.filter.call(row.children, function (c) { return c.tagName === 'TD'; })); }
+            if (f.length) { f[0].focus(); return true; }
             return false;
         };
-        var idx = $td[0].cellIndex;
+        var idx = td.cellIndex;
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-            if ($t.is('select, textarea') || ($t.is('input') && !$t.is('[type=checkbox], [type=radio]'))) { return; }
-            if (go(e.key === 'ArrowDown' ? $tr.next() : $tr.prev(), idx)) { e.preventDefault(); }
+            if (matches(target, 'select, textarea') || (matches(target, 'input') && !matches(target, '[type=checkbox], [type=radio]'))) { return; }
+            if (go(e.key === 'ArrowDown' ? tr.nextElementSibling : tr.previousElementSibling, idx)) { e.preventDefault(); }
         } else if ((e.key === 'Home' || e.key === 'End') && e.ctrlKey) {
-            if (go(e.key === 'Home' ? $tr.siblings().addBack().first() : $tr.siblings().addBack().last(), idx)) { e.preventDefault(); }
+            var parent = tr.parentNode;
+            if (go(e.key === 'Home' ? parent.firstElementChild : parent.lastElementChild, idx)) { e.preventDefault(); }
         }
     };
 
     DataTable.prototype.destroy = function () {
         this.seq++;
         this.closeMenus();
-        this.menus.forEach(function (m) { $(document).off('mousedown.expdtmenu' + m.id); m.$group.remove(); });
-        if (this.$options) { this.closeOptions(); this.$options.remove(); }
-        if (this.$filter) { this.$filter.off('.expdt'); }
-        this.$pagers.add(this.$compacts).remove();
-        this.$el.removeData('expDataTable');
-        if (this.el.tagName === 'TABLE') { this.$table.removeData('expDataTable'); }
-        else { this.$root.removeClass('exp-dt').empty(); }
+        this.menus.forEach(function (m) { m.unlistenPage(); remove(m.group); });
+        if (this.optionsDialog) { this.closeOptions(); remove(this.optionsDialog); }
+        if (this.filterInput) {
+            if (this.jq) { this.jq(this.filterInput).off('.expdt'); } else if (this.offFilter) { this.offFilter(); }
+        }
+        this.pagers.concat(this.compacts).forEach(remove);
+        unstore(this, this.el);
+        if (this.el.tagName === 'TABLE') { unstore(this, this.table); }
+        else { removeClass(this.root, 'exp-dt'); empty(this.root); }
     };
+
+    // ---- the jQuery properties of the jQuery version -------------------------------------------------------
+    // $table, $body ... are the elements in jQuery while the page has it (undefined without jQuery or before the
+    // part is built), for code written for $.fn.expDataTable
+
+    function jqProperty(proto, name, prop, jqOf) {
+        Object.defineProperty(proto, name, {
+            configurable: true,
+            get: function () { var jq = jqOf(this), v = this[prop]; return jq && v ? wrapIn(jq, v) : undefined; },
+            set: function (v) { Object.defineProperty(this, name, { value: v, writable: true, configurable: true, enumerable: true }); }
+        });
+    }
+    var TABLE_PARTS = {
+        $el: 'el', $root: 'root', $scroll: 'scroller', $table: 'table', $head: 'head', $body: 'body', $message: 'message',
+        $status: 'status', $all: 'checkAll', $toolbar: 'toolbarElement', $filter: 'filterInput', $options: 'optionsDialog',
+        $presets: 'presetsFieldset', $columnList: 'columnList', $orderList: 'orderList', $columnFilter: 'columnFilter',
+        $pagers: 'pagers', $compacts: 'compacts'
+    };
+    Object.keys(TABLE_PARTS).forEach(function (name) { jqProperty(DataTable.prototype, name, TABLE_PARTS[name], function (o) { return o.jq; }); });
+    ['wrap', 'button', 'group', 'menu'].forEach(function (part) {
+        jqProperty(MenuButton.prototype, '$' + part, part, function (o) { return o.table.jq; });
+    });
+
+    // ---- set up -------------------------------------------------------------------------------------------
+
+    /**
+     * Exp.datatable.create(el, options): sets up a table on el (an element or a selector; again, with the new
+     * options, when it has one) and returns it. No jQuery needed: callbacks get elements.
+     */
+    function create(el, options) {
+        el = first(el);
+        if (!el) { return null; }
+        var inst = get(el);
+        if (inst) { inst.destroy(); }
+        return new DataTable(el, options, { jq: Exp.$ || null, wrapped: false });
+    }
+
+    /**
+     * Puts $.fn.expDataTable on a jQuery: Exp.$ when the file loads; call it for a jQuery the page loads later.
+     * $(el).expDataTable(options) sets one up (again, with options); $(el).expDataTable('method', args...) calls one.
+     */
+    function install(jq) {
+        if (!jq || !jq.fn || (jq.fn.expDataTable && jq.fn.expDataTable.exp)) { return false; }
+        jq.fn.expDataTable = function (options) {
+            var args = Array.prototype.slice.call(arguments, 1), out;
+            this.each(function () {
+                var inst = tables.get(this) || jq.data(this, 'expDataTable');
+                if (typeof options === 'string') {
+                    if (inst && isFn(inst[options])) {
+                        var r = inst[options].apply(inst, args);
+                        if (out === undefined) { out = r; }
+                    }
+                    return;
+                }
+                if (inst) { inst.destroy(); }
+                new DataTable(this, options, { jq: jq, wrapped: true });
+            });
+            return out === undefined ? this : out;
+        };
+        jq.fn.expDataTable.exp = true;
+        return true;
+    }
 
     Exp.datatable = {
         DataTable: DataTable,
+        create: create,
+        get: get,
+        install: install,
         formatDate: formatDate,
         validateNumber: validateNumber,
         normalizeOffset: normalizeOffset,
@@ -1422,25 +1872,13 @@
         escapeHtml: escapeHtml
     };
 
-    /** $(el).expDataTable(options) sets one up (again, with options); $(el).expDataTable('method', args...) calls one. */
-    $.fn.expDataTable = function (options) {
-        var args = Array.prototype.slice.call(arguments, 1), out;
-        this.each(function () {
-            var inst = $.data(this, 'expDataTable');
-            if (typeof options === 'string') {
-                if (inst && isFn(inst[options])) {
-                    var r = inst[options].apply(inst, args);
-                    if (out === undefined) { out = r; }
-                }
-                return;
-            }
-            if (inst) { inst.destroy(); }
-            new DataTable($(this), options);
-        });
-        return out === undefined ? this : out;
-    };
+    install(Exp.$);
 
-    Exp.register('datatable', function ($el, options) {
-        $el.expDataTable(options.value !== undefined && Object.keys(options).length === 1 ? {} : options);
+    Exp.register('datatable', function (target, options) {
+        var el = target && target.jquery ? target[0] : target;
+        var inst = get(el);
+        if (inst) { inst.destroy(); }
+        new DataTable(el, options.value !== undefined && Object.keys(options).length === 1 ? {} : options,
+                      { jq: Exp.$ || null, wrapped: !!Exp.$ });
     });
 }(window, document));

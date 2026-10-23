@@ -9,6 +9,12 @@
          data-pref="{$test_pref|wash}"
          data-inline-scripts="{$inline_scripts|wash}"
          data-close="{'Close'|i18n( 'extension/expui' )|wash}"></div>
+    {* the scripts one by one, for the tests that load them into a frame without jQuery (ExpTest.bare()) *}
+    <div id="exp-test-bare" hidden="hidden"
+         data-core="{'javascript/exp/core.js'|ezdesign( 'no' )|wash}"
+         data-io="{'javascript/exp/io.js'|ezdesign( 'no' )|wash}"
+         data-datatable="{'javascript/exp/datatable.js'|ezdesign( 'no' )|wash}"
+         data-dialog="{'javascript/exp/dialog.js'|ezdesign( 'no' )|wash}"></div>
     <input id="exp-test-input" type="text" aria-label="Test field" />
     <div id="exp-test-sandbox"></div>
 </div>

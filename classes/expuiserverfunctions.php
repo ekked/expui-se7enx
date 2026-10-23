@@ -11,7 +11,9 @@
  * exp::core   jQuery 4 (and jQuery Migrate 4 while [ExpUI] Migrate=enabled), then the Exp core
  * exp::core::shared
  *             the same, but without jQuery and Migrate when ezjsc::jquery already loads this jQuery 4 earlier in
- *             the same list (expui activated before ezjscore): the core then uses the page's jQuery
+ *             the same list (expui activated before ezjscore): the core then uses the page's jQuery, and on a page
+ *             that requests no ezjsc::jquery it runs without jQuery (Exp.$ undefined; exp::io and exp::datatable
+ *             work, the other modules say in the console that they need jQuery)
  * exp::io     Exp.io, the server calls (needs exp::core first)
  * exp::compat $.ez() on the page's jQuery as a wrapper over Exp.io.call() (needs exp::io)
  * exp::collapse  Exp.collapse(), $.fn.expCollapse: collapsible menus (needs exp::core)
@@ -149,7 +151,7 @@ class expUIServerFunctions
         return '';
     }
 
-    /** exp::datatable: $.fn.expDataTable, sortable, paged tables with selection and inline editing (exp::io for server function sources and saving edits). */
+    /** exp::datatable: Exp.datatable.create() and $.fn.expDataTable, sortable, paged tables with selection and inline editing, with or without jQuery (exp::io for server function sources and saving edits). */
     public static function datatable( $args, &$packerFiles )
     {
         $packerFiles = array_merge( array( 'exp/datatable.js' ), $packerFiles );
@@ -200,7 +202,9 @@ class expUIServerFunctions
 
     /**
      * After jQuery 4 (and Migrate): keep it as Exp.$; give the page its own jQuery and $ back when it had
-     * another one (jQuery.noConflict(true)), so existing code keeps the jQuery it was written for.
+     * another one (jQuery.noConflict(true)), so existing code keeps the jQuery it was written for. When the page has
+     * no jQuery at all (exp::core::shared left it out and nothing else loaded one), Exp.$ stays undefined and the core
+     * runs on plain JavaScript; so it does, with an error in the console, when the jQuery found is not a 4.x.
      *
      * @return string JavaScript
      */
@@ -211,8 +215,13 @@ class expUIServerFunctions
     'use strict';
     var jq = window.jQuery, previous = window.ExpPrevious || {}, Exp = window.Exp = window.Exp || {};
     try { delete window.ExpPrevious; } catch (e) { window.ExpPrevious = undefined; }
+    if (!jq) {
+        // exp::core::shared on a page that loads no jQuery: the core runs on plain JavaScript, Exp.$ stays undefined
+        Exp.jQueryShared = false;
+        return;
+    }
     if (!jq || !jq.fn || String(jq.fn.jquery).split('.')[0] !== '4') {
-        if (window.console) { window.console.error('Exp: jQuery 4 was expected, found ' + (jq && jq.fn ? jq.fn.jquery : 'none')); }
+        if (window.console) { window.console.error('Exp: jQuery 4 was expected, found ' + (jq && jq.fn ? jq.fn.jquery : 'none') + '; the core runs without jQuery'); }
         return;
     }
     var other = previous.jQuery && previous.jQuery !== jq ? previous.jQuery : null;

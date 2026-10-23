@@ -2,7 +2,8 @@ exp::datatable
 ==============
 
 Sortable, paged tables with row selection, column toggling, inline editing, action menus and a
-"Table options" dialog. Available since 1.0.0.1. Replaces the YUI 2 DataTable stack: DataTable,
+"Table options" dialog, on plain JavaScript: `Exp.datatable.create()` needs no jQuery, and
+`$.fn.expDataTable` stays for code written for jQuery. Available since 1.0.0.1. Replaces the YUI 2 DataTable stack: DataTable,
 Paginator, TextboxCellEditor, DataSource and XHRDataSource, Button (menu buttons), SimpleDialog,
 Cookie and KeyListener.
 
@@ -76,6 +77,38 @@ message. A status region tells screen readers about page and sort changes.
 > **Start it from code when the template has data to hand over** (the admin's sub-items table has
 > labels, languages, class lists). For a plain table already in the page, `data-exp-datatable`
 > is enough: see *An existing table* below.
+
+### Without jQuery
+
+A page that loads no jQuery asks for `exp::core::shared` without `ezjsc::jquery` in front, and starts
+the table with `Exp.datatable.create(element, options)`. The options, the markup, the classes and
+the behaviour are those of `$.fn.expDataTable`; only the callbacks get elements instead of jQuery
+objects (see [Callbacks](#callbacks)):
+
+```html
+{exp_config()}
+{ezscript_require( array( 'exp::core::shared', 'exp::io', 'exp::datatable' ) )}
+
+<script>
+{literal}
+Exp.ready(function () {
+    var table = Exp.datatable.create('#my-table', {
+        columns: [{ key: 'name', label: 'Name', sortable: true,
+                    render: function (row, td) { return '<a href="' + row.url + '">' + row.name + '</a>'; } }],
+        source: { fn: 'ezjscnode::subtree', args: function (s) { return [2, s.limit, s.offset]; },
+                  parse: function (c) { return { rows: c.list, total: c.total_count }; } },
+        paging: { limit: 25 }
+    });
+    table.el.addEventListener('exp:datatable:select', function (e) { console.log(e.detail.count); });
+});
+{/literal}
+</script>
+```
+
+`exp::core::shared` leaves jQuery out when `ezjsc::jquery` would load the same release; when the
+page requests no `ezjsc::jquery`, it has none, `Exp.$` is `undefined` and the core, `exp::io` and
+`exp::datatable` run on plain JavaScript (the requests go through `fetch`, sent as jQuery sent
+them). `create()` works the same on a page that has jQuery.
 
 ### An existing table
 
@@ -285,7 +318,8 @@ The instance
 ------------
 
 ```js
-var table = $('#my-table').data('expDataTable');      // or $('#my-table').expDataTable('method', args...)
+var table = Exp.datatable.create('#my-table', options);   // or Exp.datatable.get(element) for one set up already
+var table = $('#my-table').data('expDataTable');         // with jQuery; or $('#my-table').expDataTable('method', args...)
 table.load();  table.reload();  table.flushCache();
 table.setPage(2);  table.setLimit(50);  table.sortBy('name', 'desc');  table.setFilter('news');
 table.page();  table.pages();  table.total;  table.stateCopy();
@@ -296,12 +330,50 @@ table.openOptions();  table.closeOptions();  table.action('ezbtn-more');
 table.destroy();
 ```
 
-Calling `$(el).expDataTable(options)` again sets it up again with the new options.
+Calling `Exp.datatable.create(el, options)` or `$(el).expDataTable(options)` again sets it up
+again with the new options. `table.rowData(tr)` is the row a `<tr>` shows.
+
+| `Exp.datatable.` | |
+|---|---|
+| `create(el, options)` | sets up a table on `el` (an element or a selector) and returns it; `null` when there is no such element |
+| `get(el)` | the table set up on `el` (or on the `<table>` inside it), or `null` |
+| `install(jQuery)` | puts `$.fn.expDataTable` on a jQuery; done for `Exp.$` when the file loads, call it for a jQuery the page loads later (`exp::datatable` loaded first). `false` when it was there already |
+| `DataTable` | the class; `new DataTable($(el), options)` is `$(el).expDataTable(options)` |
+| `formatDate()`, `validateNumber()`, `normalizeOffset()`, `pageRange()`, `escapeHtml()` | the helpers |
+
+The parts of the table, as elements: `el` (the element it was set up on), `root` (`.exp-dt`),
+`scroller`, `table`, `head`, `body`, `message`, `status`, `checkAll`, `toolbarElement`,
+`filterInput`, `optionsDialog`, `presetsFieldset`, `columnList`, `orderList`, `columnFilter`,
+`pagers` and `compacts` (arrays); `editing` is `{ td, input, row, key, old, column, type }` while
+a cell is edited; each of `table.menus` has `wrap`, `button`, `group`, `menu`. On a page with
+jQuery the same parts are there in jQuery as well, as code written for `$.fn.expDataTable` uses
+them: `$el`, `$root`, `$scroll`, `$table`, `$head`, `$body`, `$message`, `$status`, `$all`,
+`$toolbar`, `$filter`, `$options`, `$presets`, `$columnList`, `$orderList`, `$columnFilter`,
+`$pagers`, `$compacts`, `editing.$in`, a menu's `$wrap`, `$button`, `$group`, `$menu`
+(`undefined` without jQuery, or before the part is built).
+
+### Callbacks
+
+The same callbacks with either entry point; where the jQuery version handed over jQuery objects,
+`$.fn.expDataTable` still does, and `create()` hands over the element:
+
+| | `Exp.datatable.create()` | `$.fn.expDataTable` |
+|---|---|---|
+| `render(row, td, table)` | the `<td>` | `$td`, the cell in jQuery |
+| `onClick(table, event)` of an action and a Table options button | the browser's event | jQuery's event |
+| `checks()`, `toolbar()` | an array of the check boxes, the toolbar element | jQuery |
+
+`render` may return HTML (a string), an element, a list of elements or a jQuery object. Every
+other callback gets rows, keys, values, items and the table, as before.
 
 Events
 ------
 
-Fired on the table's element and through `Exp.on()`, with `table` (the element) in the data:
+Fired on the table's element and through `Exp.on()`, with `table` (the element) in the data. On
+the element they are `CustomEvent`s that bubble, the data in `event.detail`; with jQuery on the
+page they are triggered through jQuery as well, so `$(el).on(name, function (e, data) {})` gets
+the data as its second argument. Each listener hears each event once: while the `CustomEvent` is
+dispatched, jQuery's own listeners are told it was triggered already (`jQuery.event.triggered`).
 
 | Event | Data |
 |---|---|
@@ -318,7 +390,8 @@ Fired on the table's element and through `Exp.on()`, with `table` (the element) 
 | `exp:datatable:error` | `{ error, state }` (loading) or `{ error, row, key, value }` (saving) |
 
 ```js
-$('#my-table').on('exp:datatable:select', function (e, d) { $('#remove').prop('disabled', !d.count); });
+table.el.addEventListener('exp:datatable:select', function (e) { removeButton.disabled = !e.detail.count; });
+$('#my-table').on('exp:datatable:select', function (e, d) { $('#remove').prop('disabled', !d.count); });   // with jQuery
 ```
 
 Keyboard and screen readers
@@ -394,7 +467,7 @@ if (window.Exp && Exp.$ && Exp.$.fn.expDataTable && window.eZAjaxSubitemsExpData
 } else {
     // the YUI 2 table, as before
 }
-// inside: $('#content-sub-items-list').expDataTable({ source: { url: ..., cache: 20 }, paging: { containers: ['#bpg'], compact: ['#tpg'] },
+// inside: Exp.datatable.create('#content-sub-items-list', { source: { url: ..., cache: 20 }, paging: { containers: ['#bpg'], compact: ['#tpg'] },
 //         select: { key: 'checkbox', name: 'DeleteIDArray[]', ... }, columnToggle: { save: <the eZSubitemColumns cookie> },
 //         inlineEdit: { fn: 'ezjscnode::updatepriority', data: ... }, actions: [...], tableOptions: {...} })
 ```
@@ -435,7 +508,7 @@ forms posted (`tags/add/<tag>/<locale>`, `tags/deletetags`, `tags/movetags`, wit
 Tests
 -----
 
-`design/standard/javascript/exp/test/datatable.test.js`, 25 tests on `/expui/test`:
+`design/standard/javascript/exp/test/datatable.test.js`, 29 tests on `/expui/test`:
 
 - the helpers (dates, numbers, offsets, page links, escaping);
 - the markup: header cells, `aria-sort`, hidden columns, the status region;
@@ -451,7 +524,13 @@ Tests
   opened, groups, plain and disabled buttons, a click outside;
 - inline editing: click, Enter, Escape, an invalid value, leaving the field, the reload when sorted
   by it, a failed save, a server function with its fields;
-- the filter, the keyboard in the rows, the plugin's methods, `data-exp-datatable`, `Exp.on()`.
+- the filter, the keyboard in the rows, the plugin's methods, `data-exp-datatable`, `Exp.on()`;
+- without jQuery (in a frame that loads none, `ExpTest.bare()`): `Exp.datatable.create()` and
+  `$.fn.expDataTable` draw the same markup step by step (the first page, a sort, the pagers,
+  selection, a menu, Escape, the cell editor, columns, Table options, `destroy()`); callbacks get
+  elements, the events are `CustomEvent`s, `Exp.datatable.get()`;
+- with jQuery: the plugin's callbacks get jQuery, the jQuery properties, `$.data(tr, 'expRow')`,
+  each event once through jQuery and once natively, `create()` on a jQuery page.
 
 The admin's sub-items table and eztags' children table are also tested by use, as the note at the
 top says.

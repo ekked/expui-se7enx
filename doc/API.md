@@ -32,12 +32,12 @@ nothing: the running core, its events and its modules stay.
 
 | Key | Loads |
 |---|---|
-| `exp::core::shared` | the core without its own jQuery when `ezjsc::jquery`, earlier in the same list, loads the same jQuery release (compared by file name); otherwise like `exp::core` |
+| `exp::core::shared` | the core without its own jQuery when `ezjsc::jquery`, earlier in the same list, loads the same jQuery release (compared by file name); otherwise like `exp::core`. On a page that requests no `ezjsc::jquery` the page then has no jQuery: the core runs on plain JavaScript (see [Without jQuery](#without-jquery)) |
 | `exp::collapse` | `Exp.collapse()`, `$.fn.expCollapse` (needs the core) |
 | `exp::sticky` | `Exp.sticky`, `$.fn.expSticky` (needs the core) |
 | `exp::dialog` | `Exp.dialog`, `data-exp-dialog` (needs the core; `Exp.dialog.form()` also `exp::io`) |
 | `exp::upload` | `Exp.upload`, `$.fn.expUpload`, `data-exp-upload` (needs the core; `exp::io` gives failures their `Exp.io.Error` type) |
-| `exp::datatable` | `Exp.datatable`, `$.fn.expDataTable`, `data-exp-datatable` (needs the core; `exp::io` for server sources) |
+| `exp::datatable` | `Exp.datatable.create()`, `$.fn.expDataTable` (when the page has jQuery), `data-exp-datatable` (needs the core; `exp::io` for server sources) |
 | `exp::datepicker` | `Exp.datepicker`, `$.fn.expDatePicker`, `window.showDatePicker()` (needs the core) |
 | `exp::autosave` | `Exp.autosave`, `$.fn.expAutosave`, `$.fn.expPreview` (needs the core; the preview also `exp::collapse`) |
 
@@ -45,6 +45,30 @@ Their stylesheets: `exp/dialog.css`, `exp/upload.css`, `exp/datatable.css`,
 `exp/datepicker.css` (and `exp/autosave.css`, empty for now), each on top of
 `exp/core.css`. The admin designs load every key above but `exp::compat`, and
 every stylesheet, on every page.
+
+### Without jQuery
+
+`exp::core::shared` on a page that loads no jQuery: `Exp.$` is `undefined`, and the core,
+`exp::io` and `exp::datatable` work on plain JavaScript, with the same API (the differences are
+named where they are documented below: `Exp.ready()`'s `$`, what `Exp.register()` hands over,
+`Exp.io.raw()`, the datatable's callbacks). Server calls go through `fetch`, sent as jQuery sent
+them: the same address, method, fields (`Exp.util.param()`), form token, `Accept` and
+`X-Requested-With` headers, cookies for the same origin.
+
+| Needs jQuery 4 (`Exp.$`) | Works without it |
+|---|---|
+| `exp::compat`, `exp::collapse`, `exp::sticky`, `exp::dialog`, `exp::upload`, `exp::datepicker`, `exp::autosave` | `exp::core`, `exp::io`, `exp::datatable` |
+
+A module of the first column requested on a page without jQuery sets nothing up and says so in
+the browser console (`Exp: exp::dialog needs jQuery 4, and this page has none; request
+ezjsc::jquery before exp::core::shared`); request `ezjsc::jquery` in front of
+`exp::core::shared` for it. With jQuery 4 on the page, everything runs on it exactly as before.
+
+The core takes the jQuery that is on the page when it boots. A jQuery that arrives later (a
+template further down the page requests `ezjsc::jquery` after another one requested
+`exp::core::shared`) is not taken over: `Exp.$` stays undefined, the modules of the first column
+say so in the console, and the data table keeps running without jQuery. A page that needs one of
+those modules requests `ezjsc::jquery` in the same list, in front of `exp::core::shared`.
 
 `Exp` core (`exp::core`)
 -----------------------
@@ -54,8 +78,13 @@ every stylesheet, on every page.
 jQuery 4. Use it (or the `$` that `Exp.ready()` hands you) in code written for the
 API. When the page already has jQuery 4 (`ezjsc::jquery` with expui activated
 before ezjscore), `Exp.$` is that same jQuery. When the page has an older
-jQuery, `window.jQuery` and `window.$` stay that one. When it has none,
-jQuery 4 is the page's jQuery too.
+jQuery, `window.jQuery` and `window.$` stay that one. When it has none and
+`exp::core` brought jQuery 4, jQuery 4 is the page's jQuery too.
+
+**`undefined` without jQuery**: `exp::core::shared` on a page that loads none (or one that is
+not a 4.x, which the console reports) leaves `Exp.$` unset and `Exp.jQueryShared` `false`; the
+core runs on plain JavaScript ([Without jQuery](#without-jquery)). Test `Exp.$` before using it
+in code that may run there.
 
 ```js
 Exp.$.fn.jquery          // "4.0.0"
@@ -72,7 +101,7 @@ Exp.config.siteaccess    // "admin"
 Exp.config.call          // "/admin/ezjscore/call/"
 Exp.config.prefsUrl      // "/admin/user/preferences"
 Exp.config.locale        // { code: "eng-GB", http: "en-GB", firstDay: 1 }   firstDay: 1 = Monday
-Exp.config.jquery        // "4.0.0"
+Exp.config.jquery        // "4.0.0"            null without jQuery
 Exp.config.tokenElement  // "ezxform_token_js"  where the form token is read from
 Exp.config.separator     // "@SEPARATOR$"       between calls in one ezjscore request
 ```
@@ -80,7 +109,8 @@ Exp.config.separator     // "@SEPARATOR$"       between calls in one ezjscore re
 ### `Exp.ready(fn)`
 
 Runs `fn($)` when the DOM is ready and the page's `data-exp-*` modules have been
-started. `$` is jQuery 4.
+started. `$` is `Exp.$`: jQuery 4, or `undefined` on a page without jQuery. The functions run in
+the order they were given, never synchronously (also after the page was ready), as with jQuery.
 
 ### `Exp.i18n(text, params)`
 
@@ -94,7 +124,9 @@ Exp.i18n('The server answered with an error (HTTP %status).', { '%status': 500 }
 
 ### `Exp.on(name, fn)`, `Exp.off(name, fn)`, `Exp.emit(name, data)`
 
-Page-wide events. Handlers get `(event, data)`. The core's own events:
+Page-wide events. Handlers get `(event, data)`; `event` is jQuery's event, or without jQuery
+`{ type, namespace, timeStamp }`. Several names separated by spaces and namespaces
+(`name.ns`, `Exp.off('.ns')`) work either way. The core's own events:
 
 | Event | Data |
 |---|---|
@@ -113,7 +145,8 @@ Exp.register('counter', function ($el, options) { /* … */ });
 ```
 
 - `name`: lower-case letters, digits and `-`. Elements with `data-exp-<name>` are
-  started with `init.call(element, $(element), options)`, **once per element**.
+  started with `init.call(element, $(element), options)`, **once per element**; without jQuery
+  with `init.call(element, element, options)`.
 - `options`: the attribute's value parsed as JSON when it starts with `{`, else
   `{ value: "<the attribute>" }`, else `{}`.
 - Registered after the page was ready: started at once.
@@ -130,7 +163,8 @@ User preferences, the ones `ezpreference()` reads in templates.
   else `fallback`.
 - `set`: saves it for the signed-in user (`user/preferences`, with the form
   token); returns a Promise of the saved value. Names: letters, digits, `_`, `.`,
-  `-`, up to 64 characters.
+  `-`, up to 64 characters. A failed request rejects with the jqXHR, or without jQuery with an
+  object that has its `status`, `statusText` and `textStatus`.
 
 ### `Exp.keys.bind(combo, fn, options)`, `Exp.keys.unbind(id)`
 
@@ -153,11 +187,23 @@ page's form token (`#ezxform_token_js`), or `''`.
 
 The `<html>` element gets the class `exp-js`.
 
+### `Exp.util`
+
+What the plain JavaScript parts use, for code that should run without jQuery:
+
+| | |
+|---|---|
+| `Exp.util.extend([deep,] target, source…)` | `jQuery.extend()`'s rules (undefined values skipped, `deep` merges plain objects and arrays); it is `jQuery.extend` when the page has jQuery |
+| `Exp.util.param(fields)` | `jQuery.param()`'s encoding (`a[b]=1`, `a[]=1`, an array of `{name, value}`); it is `jQuery.param` when the page has jQuery |
+| `Exp.util.isPlainObject(value)` | as `jQuery.isPlainObject()` |
+| `Exp.util.request(options)` → Promise | a request as `jQuery.ajax()` sends it, on `fetch`: `url`, `method` (`GET`), `data` (fields, a string or `FormData`; added to the address for GET), `dataType` (`'json'`, or the answer's own type), `headers`, `timeout`, `signal`. Form fields go as `application/x-www-form-urlencoded` (`%20` as `+`), `X-Requested-With: XMLHttpRequest` to the same origin, cookies to the same origin only. Rejects with `{ status, statusText, textStatus, responseText, responseJSON, responseURL, getResponseHeader() }` (`textStatus`: `error`, `timeout`, `abort`, `parsererror`); the Promise has `abort()` |
+
 `Exp.io` (`exp::io`)
 -------------------
 
 The ezjscore server calls. Same endpoint, arguments and form token as `$.ez()`
-and YUI's `io-ez`.
+and YUI's `io-ez`. Through `jQuery.ajax()` when the page has jQuery 4, else through `fetch`
+(`Exp.util.request()`), with the same requests and the same answers.
 
 ### `Exp.io.call(fn, args, options)` → Promise
 
@@ -205,12 +251,13 @@ Exp.io.poll('ezpublishingqueue::status', [contentObjectId, version], {
 | `kind` | `signedout` (session ended, status 401), `refused` (403), `server` (an HTTP error, or the server function's `error_text`), `network` (no answer or aborted), `timeout`, `invalid` (bad arguments; nothing was sent) |
 | `status` | the HTTP status (0 when there was none) |
 | `message` | a translated message, or the server function's error text |
-| `response` | the jqXHR or the server's JSON |
+| `response` | the jqXHR (without jQuery: the object `Exp.util.request()` rejects with) or the server's JSON |
 
 ### `Exp.io.raw(callString, options)`, `Exp.io.callString(fn, args)`
 
 The building blocks: `callString` gives `'class::function::a::b'`; `raw` sends it
-and returns the jqXHR of the call view's JSON (`{error_text, content}`).
+and returns the jqXHR of the call view's JSON (`{error_text, content}`); without jQuery a
+Promise of that JSON, with `abort()`.
 
 `exp::compat`
 -------------
@@ -362,12 +409,14 @@ Markup: `data-exp-upload` with the options as JSON. Everything about it:
 `exp::datatable`
 ----------------
 
-### `$(el).expDataTable(options)`
+### `Exp.datatable.create(el, options)`, `$(el).expDataTable(options)`
 
 Sortable, paged tables with selection, column toggling, inline editing, action
 menus, a "Table options" dialog and a filter. `el` is an element to build the
 table in, or an existing `<table>` (its header gives the columns, its rows the
-data).
+data). `Exp.datatable.create()` needs no jQuery and returns the instance; with jQuery on the page
+`$.fn.expDataTable` does the same, its callbacks getting jQuery objects as before (`render(row,
+$td)`), where `create()`'s get elements (`render(row, td)`).
 
 Options: `columns`, `source` (`{ rows }`, `{ dom: true }`, `{ url, … }`,
 `{ fn, args, … }` for `Exp.io.call()`, or a function of the state), `rowKey`,
@@ -376,18 +425,21 @@ Options: `columns`, `source` (`{ rows }`, `{ dom: true }`, `{ url, … }`,
 `loading`, `error`, `caption`, `tableClass`, `dateFormat`, `onLoad`, `onRender`,
 `initialLoad`.
 
-The instance (`$(el).data('expDataTable')`, or
+The instance (`Exp.datatable.get(el)`, `$(el).data('expDataTable')`, or
 `$(el).expDataTable('method', args…)`): `load()`, `reload()`, `flushCache()`,
 `setPage()`, `setLimit()`, `sortBy(key, dir)`, `setFilter()`, `page()`,
 `pages()`, `total`, `stateCopy()`, `rows()`, `selected()`, `selectAll()`,
 `invert()`, `showColumn()`, `hideColumn()`, `visibleColumns()`,
-`openOptions()`, `closeOptions()`, `action(id)`, `destroy()`. Calling
-`$(el).expDataTable(options)` again sets it up again.
+`openOptions()`, `closeOptions()`, `action(id)`, `rowData(tr)`, `destroy()`; its parts as
+elements (`table`, `body`, `head`, `pagers` …) and, with jQuery, in jQuery (`$table`, `$body` …).
+Setting it up again on the same element replaces it.
 
-`Exp.datatable`: `DataTable` (the class) and its helpers `formatDate()`,
-`validateNumber()`, `normalizeOffset()`, `pageRange()`, `escapeHtml()`.
+`Exp.datatable`: `create()`, `get()`, `install(jQuery)` (`$.fn.expDataTable` on a jQuery loaded
+later), `DataTable` (the class) and its helpers `formatDate()`, `validateNumber()`,
+`normalizeOffset()`, `pageRange()`, `escapeHtml()`.
 
-Events (on the element and page-wide), with `{ table, … }`:
+Events (on the element as `CustomEvent`s with the data in `event.detail`, through jQuery as well
+when the page has it, and page-wide), with `{ table, … }`:
 `exp:datatable:load`, `:sort`, `:page`, `:filter`, `:select`, `:edit`,
 `:invalid`, `:columns`, `:options`, `:error`. Markup: `data-exp-datatable`
 with the options as JSON. Everything about it:

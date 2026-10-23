@@ -1,6 +1,54 @@
 Changelog
 =========
 
+Unreleased
+----------
+
+Added
+- Exponential UI runs without jQuery. `exp::core::shared` on a page that
+  requests no `ezjsc::jquery` brings none: the boot leaves `Exp.$` unset (no
+  error), and `exp::core`, `exp::io` and `exp::datatable` run on plain
+  JavaScript with the same API. Where jQuery 4 is on the page, they run on it
+  exactly as before. [API.md](API.md#without-jquery)
+- `exp::core`: `Exp.util.extend()`, `param()`, `isPlainObject()` (jQuery's
+  rules; jQuery's own functions when it is there) and `Exp.util.request()`, a
+  request as `jQuery.ajax()` sends it, on `fetch`. Without jQuery
+  `Exp.config.jquery` is `null`, `Exp.ready()` hands over `undefined`, and
+  `Exp.register()` modules get the element itself.
+- `exp::io` without jQuery: the same requests through `fetch` (address,
+  method, fields, form token, `Accept` and `X-Requested-With`, cookies for the
+  same origin, timeouts, aborting) and the same answers and `Exp.io.Error`
+  kinds; `Exp.io.raw()` then returns a Promise with `abort()`.
+- `exp::datatable` is written on the DOM: `Exp.datatable.create(el, options)`
+  sets up a table without jQuery (callbacks get elements: `render(row, td)`),
+  `Exp.datatable.get(el)` finds one, the parts are there as elements
+  (`table.body`, `table.pagers` …) and `table.rowData(tr)` gives a row. The
+  events on the element are also `CustomEvent`s (the data in
+  `event.detail`). `$.fn.expDataTable` stays, registered on `Exp.$` (and with
+  `Exp.datatable.install(jQuery)` on a jQuery loaded later): the same markup,
+  callbacks with jQuery objects, the jQuery properties (`$table`, `$body` …),
+  `$.data(tr, 'expRow')`, listeners bound through jQuery so `.trigger()`
+  reaches them. [modules/datatable.md](modules/datatable.md#without-jquery)
+- `expui/test`: `ExpTest.bare()`, a frame without jQuery, and 7 tests of the
+  plain JavaScript path (125 tests). [TESTING.md](TESTING.md)
+
+Changed
+- The modules that need jQuery (`exp::compat`, `exp::collapse`,
+  `exp::sticky`, `exp::dialog`, `exp::upload`, `exp::datepicker`,
+  `exp::autosave`) say so in the browser console when the page has none,
+  instead of setting nothing up silently.
+- When the boot finds a jQuery that is not a 4.x, the core now runs without
+  jQuery instead of not at all (the console still says which jQuery it found).
+
+Fixed
+- `exp::datatable`: while the `CustomEvent` of a table event is dispatched,
+  only the table's own jQuery listeners are told it was triggered already, so
+  each listener hears each event once and other jQuery handlers on the page
+  are not held back. [modules/datatable.md](modules/datatable.md#events)
+- `expui/test`: the `Exp.io` test without jQuery compares what reaches the
+  server (the `expui/test/echo` answer) with what jQuery sends, instead of
+  only what the client built.
+
 1.0.0.14 (2026-10-20)
 ---------------------
 
